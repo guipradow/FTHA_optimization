@@ -6,11 +6,7 @@ projeto teve origem em um estudo da disciplina de Máquinas Térmicas do curso d
 Engenharia Mecânica da UTFPR, campus Guarapuava, e prepara o modelo
 termodinâmico para uso posterior em otimização multiobjetivo.
 
-O artigo de referência está em
-[`referencias/0306419016689447.pdf`](referencias/0306419016689447.pdf), e o
-relatório original está em
-[`notebooks/e2.2_case_study.ipynb`](notebooks/e2.2_case_study.ipynb). A
-implementação reutilizável encontra-se em [`src/FTHA.py`](src/FTHA.py).
+A implementação reutilizável encontra-se em [`src/FTHA.py`](src/FTHA.py).
 
 ## Modelo
 
@@ -119,41 +115,10 @@ e o expoente $n_i$ é corrigido iterativamente até que trabalho, energia
 interna, temperatura, pressão e equação de estado sejam consistentes. Intervalos
 com $v_i\simeq v_{i+1}$ são tratados como isocóricos.
 
-## Resultados apresentados no artigo
+## Validação com os parâmetros do artigo
 
-Esta seção considera somente as cinco figuras publicadas e anexadas ao projeto.
-Ela não inclui, por ora, o estudo posterior que combina diferentes rotações e
-ângulos de ignição.
-
-### Figura 1 — validação do modelo
-
-A validação compara o ciclo FTHA com a solução analítica do ciclo Otto
-ar-padrão usando:
-
-- taxa de compressão $r=8$;
-- ar quente com calores específicos constantes e $k=1{,}3343$;
-- $T_0=300\ \mathrm{K}$ e $P_0=100\ \mathrm{kPa}$;
-- adição de calor quase instantânea, com \(\delta=0{,}01^\circ\), centrada no
-  PMS;
-- 180 intervalos na compressão e na expansão e dois intervalos na adição de
-  calor.
-
-Ambos os modelos fornecem \(\eta_t=50{,}098\%\). No diagrama $P-v$ em escala
-log-log, os estados calculados pelo modelo FTHA se sobrepõem às linhas da solução
-analítica com pelo menos cinco algarismos significativos. Cada marcador mostra
-um estado da discretização politrópica.
-
-[Consultar a Figura 1 no artigo](referencias/0306419016689447.pdf#page=11).
-
-### Figuras 2–5 — efeito da duração angular da adição de calor
-
-A série publicada mantém todos os parâmetros fixos e varia apenas
-
-$$
-\delta\in\{10^\circ,30^\circ,50^\circ,70^\circ,90^\circ,110^\circ\}.
-$$
-
-Os parâmetros comuns são:
+A implementação foi validada reproduzindo o caso publicado com
+\(\delta=10^\circ\). Essa simulação mantém:
 
 | Parâmetro | Valor |
 |---|---:|
@@ -161,54 +126,67 @@ Os parâmetros comuns são:
 | Relação biela/manivela, $L/R$ | 5 |
 | Taxa de compressão, $r$ | 12 |
 | Ângulo de ignição, \(\theta\) | −5° |
+| Duração angular da adição de calor, \(\delta\) | 10° |
 | Estado inicial | 300 K e 100 kPa |
 | Calor específico fornecido, $q_{in}$ | 1.000 kJ/kg |
 | Fluido de trabalho | CO₂ |
 | Intervalos de compressão e expansão | 90 por processo |
 | Passo durante a adição de calor | 0,5° |
 
-As eficiências mostradas nas legendas são:
+O ciclo calculado possui 200 intervalos e 201 estados. A implementação usa o
+polinômio de terceiro grau disponível em [`data/data.csv`](data/data.csv) e
+obtém os seguintes resultados:
 
-| \(\delta\) | 10° | 30° | 50° | 70° | 90° | 110° |
-|---:|---:|---:|---:|---:|---:|---:|
-| \(\eta_t\) | 38,4% | 37,0% | 34,1% | 30,6% | 27,0% | 23,7% |
+| Indicador | Resultado |
+|---|---:|
+| Eficiência térmica | 38,409% |
+| Trabalho específico de compressão | 197,83 kJ/kg |
+| Trabalho específico de expansão | 581,93 kJ/kg |
+| Trabalho líquido específico | 384,09 kJ/kg |
+| Razão de consumo de trabalho | 0,3400 |
+| Pressão máxima | 5.918,86 kPa |
+| Temperatura máxima | 1.514,06 K |
 
-#### Figura 2 — $P-v$ em escala log-log
+A eficiência calculada reproduz os 38,4% publicados. Os cinco diagramas abaixo
+são gerados diretamente por [`src/base_case_analysis.py`](src/base_case_analysis.py)
+e permanecem versionados em `img/` como evidência reproduzível da validação.
 
-O gráfico evidencia a discretização dos processos e a mudança da forma do ciclo.
-À medida que \(\delta\) aumenta, a eficiência diminui e a pressão ao fim da
-expansão cresce, indicando maior potencial de produção de trabalho descartado
-com o fluido.
+### Diagrama $\log(P)\times\log(v)$
 
-[Consultar a Figura 2 no artigo](referencias/0306419016689447.pdf#page=12).
+A escala log-log evidencia os subprocessos politrópicos. A linha vertical à
+direita é a rejeição isocórica de calor que fecha o ciclo.
 
-#### Figura 3 — $P-v$ em escala linear
+![Validação do caso do artigo em diagrama log(P) por log(v)](img/base_case_log_pressure_vs_log_specific_volume.png)
 
-A área interna do ciclo, proporcional ao trabalho líquido, diminui com o aumento
-de \(\delta\). A pressão máxima também cai acentuadamente. Para os dois maiores
-valores de \(\delta\), a pressão máxima ocorre ao final da compressão, e não
-durante a adição de calor.
+### Diagrama $P\times v$
 
-[Consultar a Figura 3 no artigo](referencias/0306419016689447.pdf#page=13).
+A área interna representa o trabalho líquido específico de 384,09 kJ/kg. O pico
+de pressão ocorre próximo ao PMS, durante a adição finita de calor.
 
-#### Figura 4 — pressão por ângulo do virabrequim
+![Validação do caso do artigo em diagrama P por v](img/base_case_pressure_vs_specific_volume.png)
 
-As diferenças entre os ciclos concentram-se ao redor do PMS e no início da
-expansão. Uma adição de calor angularmente mais longa reduz e desloca o pico de
-pressão, pois uma parcela maior do calor é fornecida enquanto o pistão já se
-afasta do PMS.
+### Pressão por ângulo do virabrequim
 
-[Consultar a Figura 4 no artigo](referencias/0306419016689447.pdf#page=13).
+A faixa destacada identifica a adição de calor entre −5° e +5°. A pressão máxima
+calculada é 5.918,86 kPa.
 
-#### Figura 5 — temperatura por volume específico
+![Validação da pressão por ângulo do virabrequim](img/base_case_pressure_vs_crank_angle.png)
 
-Com o aumento de \(\delta\), o gás leva uma faixa angular maior para aquecer e
-atinge a temperatura máxima em volumes específicos progressivamente maiores.
-Resta menos expansão após o aquecimento, e o estado no PMI apresenta temperatura
-e pressão mais altas. A maior exergia descartada explica a queda monotônica da
-eficiência térmica.
+### Diagrama $T\times v$
 
-[Consultar a Figura 5 no artigo](referencias/0306419016689447.pdf#page=14).
+A temperatura máxima de 1.514,06 K é atingida ao final da adição de calor. A
+expansão converte parte dessa energia interna em trabalho antes da rejeição
+isocórica.
+
+![Validação da temperatura por volume específico](img/base_case_temperature_vs_specific_volume.png)
+
+### Expoente politrópico por ângulo do virabrequim
+
+O gráfico mostra a evolução do expoente equivalente em cada intervalo. A escala
+simétrica logarítmica preserva a visualização dos valores de grande módulo
+próximos ao PMS.
+
+![Validação do expoente politrópico por ângulo do virabrequim](img/base_case_polytropic_exponent_vs_crank_angle.png)
 
 ## Interface Python
 
@@ -238,8 +216,6 @@ print(dict(zip(OBJECTIVE_NAMES, objectives)))
 - `src/base_case_analysis.py`: simulação e diagramas diagnósticos do caso
   \(\delta=10^\circ\);
 - `data/data.csv`: coeficientes polinomiais das propriedades dos gases;
-- `notebooks/`: versões originais dos estudos;
-- `referencias/`: artigo e material bibliográfico;
 - `img/`: artefatos gráficos gerados;
 - `tests/`: testes de regressão e da interface.
 
