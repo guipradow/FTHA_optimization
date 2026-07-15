@@ -50,12 +50,12 @@ $$
 V(\alpha)=V_c+\frac{\pi D^2}{4}x(\alpha).
 $$
 
-Nesta implementação, \(\alpha=0\) corresponde ao ponto morto superior (PMS) e
-\(\alpha=\pm\pi\) ao ponto morto inferior (PMI).
+Nesta implementação, $\alpha=0$ corresponde ao ponto morto superior (PMS) e
+$\alpha=\pm\pi$ ao ponto morto inferior (PMI).
 
 ### Adição de calor
 
-Se $N$ é a rotação em rpm e \(\Delta t_c\) é o tempo de combustão, a duração
+Se $N$ é a rotação em rpm e $\Delta t_c$ é o tempo de combustão, a duração
 angular da adição de calor é
 
 $$
@@ -64,16 +64,16 @@ $$
 \delta=\omega\Delta t_c.
 $$
 
-Para uma ignição iniciada em \(\theta\), a fração acumulada de calor é modelada
+Para uma ignição iniciada em $\theta$, a fração acumulada de calor é modelada
 por
 
 $$
 y(\alpha)=
 \begin{cases}
-0, & \alpha<\theta,\\[4pt]
+0, & \alpha<\theta,\\
 \dfrac{1}{2}-\dfrac{1}{2}
 \cos\!\left[\dfrac{\pi(\alpha-\theta)}{\delta}\right],
-& \theta\leq\alpha\leq\theta+\delta,\\[8pt]
+& \theta\leq\alpha\leq\theta+\delta,\\
 1, & \alpha>\theta+\delta.
 \end{cases}
 $$
@@ -115,78 +115,75 @@ e o expoente $n_i$ é corrigido iterativamente até que trabalho, energia
 interna, temperatura, pressão e equação de estado sejam consistentes. Intervalos
 com $v_i\simeq v_{i+1}$ são tratados como isocóricos.
 
-## Validação com os parâmetros do artigo
+## Validação com os testes paramétricos do artigo
 
-A implementação foi validada reproduzindo o caso publicado com
-\(\delta=10^\circ\). Essa simulação mantém:
+A validação reproduz a série publicada para $r=12$ e $\theta=-5^\circ$, variando
+somente a duração angular da adição de calor:
+
+$$
+\delta\in\{10^\circ,30^\circ,50^\circ,70^\circ,90^\circ,110^\circ\}.
+$$
+
+Os demais parâmetros permanecem fixos:
 
 | Parâmetro | Valor |
 |---|---:|
 | Volume deslocado unitário | 250 cm³ |
 | Relação biela/manivela, $L/R$ | 5 |
 | Taxa de compressão, $r$ | 12 |
-| Ângulo de ignição, \(\theta\) | −5° |
-| Duração angular da adição de calor, \(\delta\) | 10° |
+| Ângulo de ignição, $\theta$ | −5° |
 | Estado inicial | 300 K e 100 kPa |
 | Calor específico fornecido, $q_{in}$ | 1.000 kJ/kg |
 | Fluido de trabalho | CO₂ |
 | Intervalos de compressão e expansão | 90 por processo |
 | Passo durante a adição de calor | 0,5° |
 
-O ciclo calculado possui 200 intervalos e 201 estados. A implementação usa o
-polinômio de terceiro grau disponível em [`data/data.csv`](data/data.csv) e
-obtém os seguintes resultados:
+[`src/article_validation.py`](src/article_validation.py) executa os seis testes
+com o polinômio de terceiro grau disponível em
+[`data/data.csv`](data/data.csv). As eficiências reproduzem todos os valores
+publicados na precisão de uma casa decimal:
 
-| Indicador | Resultado |
-|---|---:|
-| Eficiência térmica | 38,409% |
-| Trabalho específico de compressão | 197,83 kJ/kg |
-| Trabalho específico de expansão | 581,93 kJ/kg |
-| Trabalho líquido específico | 384,09 kJ/kg |
-| Razão de consumo de trabalho | 0,3400 |
-| Pressão máxima | 5.918,86 kPa |
-| Temperatura máxima | 1.514,06 K |
+| $\delta$ | 10° | 30° | 50° | 70° | 90° | 110° |
+|---:|---:|---:|---:|---:|---:|---:|
+| $\eta_t$ publicada | 38,4% | 37,0% | 34,1% | 30,6% | 27,0% | 23,7% |
+| $\eta_t$ calculada | 38,409% | 37,031% | 34,077% | 30,572% | 27,046% | 23,730% |
 
-A eficiência calculada reproduz os 38,4% publicados. Os cinco diagramas abaixo
-são gerados diretamente por [`src/base_case_analysis.py`](src/base_case_analysis.py)
-e permanecem versionados em `img/` como evidência reproduzível da validação.
+[`tests/test_article_validation.py`](tests/test_article_validation.py) exige
+diferença máxima de 0,05 ponto percentual entre os valores calculados e
+publicados. O teste também verifica a redução monotônica da eficiência e da
+pressão máxima com o aumento de $\delta$, além das dimensões das seis malhas.
 
 ### Diagrama $\log(P)\times\log(v)$
 
-A escala log-log evidencia os subprocessos politrópicos. A linha vertical à
-direita é a rejeição isocórica de calor que fecha o ciclo.
+O aumento de $\delta$ reduz a separação entre compressão e expansão, diminuindo
+a área interna do ciclo. A pressão ao fim da expansão aumenta, indicando maior
+potencial de produção de trabalho descartado com o fluido.
 
-![Validação do caso do artigo em diagrama log(P) por log(v)](img/base_case_log_pressure_vs_log_specific_volume.png)
+![Testes do artigo em diagrama log(P) por log(v)](img/article_variable_delta_log_pressure_vs_log_volume.png)
 
 ### Diagrama $P\times v$
 
-A área interna representa o trabalho líquido específico de 384,09 kJ/kg. O pico
-de pressão ocorre próximo ao PMS, durante a adição finita de calor.
+Em escala linear, observa-se diretamente a redução do trabalho líquido e do pico
+de pressão. Para os maiores valores de $\delta$, a pressão máxima passa a ocorrer
+ao final da compressão.
 
-![Validação do caso do artigo em diagrama P por v](img/base_case_pressure_vs_specific_volume.png)
+![Testes do artigo em diagrama P por v](img/article_variable_delta_pressure_vs_volume.png)
 
-### Pressão por ângulo do virabrequim
+### Diagrama $P\times\alpha$
 
-A faixa destacada identifica a adição de calor entre −5° e +5°. A pressão máxima
-calculada é 5.918,86 kPa.
+As diferenças concentram-se ao redor do PMS e no início da expansão. Uma adição
+de calor mais longa reduz e desloca o pico de pressão porque parte maior da
+energia é fornecida enquanto o pistão se afasta do PMS.
 
-![Validação da pressão por ângulo do virabrequim](img/base_case_pressure_vs_crank_angle.png)
+![Testes do artigo da pressão por ângulo do virabrequim](img/article_variable_delta_pressure_vs_crank_angle.png)
 
 ### Diagrama $T\times v$
 
-A temperatura máxima de 1.514,06 K é atingida ao final da adição de calor. A
-expansão converte parte dessa energia interna em trabalho antes da rejeição
-isocórica.
+Com o aumento de $\delta$, o gás leva uma faixa angular maior para aquecer e
+atinge a temperatura máxima em volumes específicos maiores. Resta menos curso
+para expansão, elevando a temperatura de descarga e reduzindo a eficiência.
 
-![Validação da temperatura por volume específico](img/base_case_temperature_vs_specific_volume.png)
-
-### Expoente politrópico por ângulo do virabrequim
-
-O gráfico mostra a evolução do expoente equivalente em cada intervalo. A escala
-simétrica logarítmica preserva a visualização dos valores de grande módulo
-próximos ao PMS.
-
-![Validação do expoente politrópico por ângulo do virabrequim](img/base_case_polytropic_exponent_vs_crank_angle.png)
+![Testes do artigo da temperatura por volume específico](img/article_variable_delta_temperature_vs_volume.png)
 
 ## Interface Python
 
@@ -213,11 +210,15 @@ print(dict(zip(OBJECTIVE_NAMES, objectives)))
 - `src/FTHA.py`: modelo termodinâmico e função objetivo;
 - `src/gas_prop.py`: propriedades do gás ideal com calores específicos
   variáveis;
+- `src/article_validation.py`: reprodução dos seis testes paramétricos e geração
+  dos quatro diagramas de validação;
 - `src/base_case_analysis.py`: simulação e diagramas diagnósticos do caso
-  \(\delta=10^\circ\);
+  $\delta=10^\circ$;
 - `data/data.csv`: coeficientes polinomiais das propriedades dos gases;
 - `img/`: artefatos gráficos gerados;
-- `tests/`: testes de regressão e da interface.
+- `tests/test_article_validation.py`: regressão numérica dos seis casos
+  publicados;
+- `tests/test_ftha.py`: regressão e validação da interface do modelo.
 
 A localização do CSV e dos diretórios de saída é calculada a partir da raiz do
 projeto e não depende do diretório corrente usado para iniciar o Python.
@@ -229,6 +230,7 @@ O projeto usa Python 3.13 e `uv`:
 ```bash
 uv sync
 uv run python -m unittest discover -s tests
+uv run python -m src.article_validation
 uv run python -m src.base_case_analysis
 uv run python -c "from src.FTHA import objective_function; print(objective_function([4500, -48]))"
 ```
