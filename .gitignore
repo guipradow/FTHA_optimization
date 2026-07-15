@@ -1,0 +1,6 @@
+.venv/
+notebooks/
+referencias/
+__pycache__/
+*.py[cod]
+.pytest_cache/
