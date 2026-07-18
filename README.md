@@ -547,6 +547,191 @@ Os resultados completos podem ser auditados em:
 - [`reports/multiobjective_best_solutions.csv`](reports/multiobjective_best_solutions.csv):
   os quatro compromissos destacados na tabela anterior.
 
+## Análise de sensibilidade do NSGA-III
+
+A sensibilidade investiga os hiperparâmetros do otimizador, mantendo inalterados
+o domínio de $N$ e $\theta$, os parâmetros físicos do artigo, a malha angular e
+os dois objetivos termodinâmicos. Para separar efeito algorítmico de esforço
+computacional, todas as configurações recebem exatamente 504 avaliações do
+modelo FTHA.
+
+### Desenho experimental e fatores
+
+População e número de gerações variam em pares que satisfazem
+$N_{pop}(N_{ger}+1)=504$:
+
+| População | Gerações | Partições/pontos de referência |
+|---:|---:|---:|
+| 12 | 41 | 11/12 |
+| 24 | 20 | 23/24 |
+| 36 | 13 | 35/36 |
+| 56 | 8 | 55/56 |
+
+Em duas dimensões, `uniform_reference_points(nobj=2, p)` produz $p+1$ pontos;
+por isso população e resolução das direções de referência são tratadas como um
+único fator de alocação do orçamento. Os outros fatores e níveis são:
+
+| Fator | Níveis |
+|---|---|
+| Probabilidade de cruzamento, $p_c$ | 0,7; 0,9; 1,0 |
+| Índice de distribuição SBX, $\eta_c$ | 10; 20; 30 |
+| Índice de distribuição da mutação, $\eta_m$ | 10; 20; 40 |
+| Probabilidade de mutação por variável, $p_m$ | 0,25; 0,50; 1,00 |
+
+O total de 504 avaliações reproduz o custo da configuração original,
+$24(20+1)$. Os níveis de $p_c$ cobrem cruzamento frequente a obrigatório; os
+índices de distribuição incluem o valor 20 usado como referência e operadores
+progressivamente mais exploratórios ou concentrados. Como há duas variáveis de
+decisão, $p_m=0{,}5=1/n_{var}$ é o centro natural; 0,25 e 1,00 testam menor e
+maior pressão de mutação. O operador de mutação é chamado para cada descendente
+e $p_m$ determina, dentro dele, a probabilidade aplicada a cada variável.
+
+O espaço fatorial completo possui 324 combinações. Foi usada uma amostra Latin
+Hypercube discreta, única e reprodutível de 36 configurações. Como 36 é
+divisível por quatro e por três, cada par população/gerações aparece nove vezes
+e cada nível dos demais fatores aparece doze vezes. A configuração usada na
+comparação de algoritmos — 24 indivíduos, 20 gerações, $p_c=0{,}9$,
+$\eta_c=\eta_m=20$ e $p_m=0{,}5$ — foi exigida no desenho como referência.
+
+A execução tem duas etapas:
+
+1. **triagem:** as 36 configurações usam as mesmas sete sementes;
+2. **confirmação:** configuração de referência, três maiores hipervolumes
+   médios da triagem e pior configuração recebem mais 14 sementes, reservadas
+   e comuns, totalizando 21 repetições nas cinco finalistas.
+
+São 322 execuções e 162.288 avaliações exatas. As sementes 8–21 não participam
+da escolha das finalistas, reduzindo o viés de selecionar e confirmar com os
+mesmos dados. Um checkpoint atômico permite retomar a bateria sem repetir
+avaliações concluídas.
+
+### Respostas e análise estatística
+
+O hipervolume com referência física nula é a resposta principal. Também são
+salvos IGD+, espaçamento, tamanho da frente, extremos, ponto de compromisso,
+tempo e hipervolume a cada geração. A referência do IGD+ é a união não dominada
+de todas as frentes da análise.
+
+Os efeitos principais são estimados em um modelo linear categórico bloqueado
+por semente; a importância é apresentada por $F$, valor-p e $\eta^2$ parcial.
+Cada interação de dois fatores é adicionada separadamente ao modelo aditivo.
+Na confirmação, as diferenças para a configuração de referência usam somente
+as 14 sementes reservadas, teste de Wilcoxon pareado, correção de Holm,
+correlação bisserial de postos e intervalo bootstrap de 95% para a diferença
+média. A configuração recomendada é a de maior hipervolume médio nessas
+sementes reservadas, usando menor desvio como desempate.
+
+### Resultados
+
+As 322 execuções foram concluídas com o orçamento previsto. Na triagem, as
+configurações `C09`, `C34` e `C22` ocuparam as três primeiras posições; `C23`
+foi a última colocada e `C12` é a referência empregada na comparação anterior
+entre algoritmos. A tabela apresenta a confirmação nas 14 sementes reservadas
+e, separadamente, a síntese das 21 execuções disponíveis para cada finalista:
+
+| Configuração | $N_{pop}$/$N_{ger}$ | $p_c$ | $\eta_c$ | $\eta_m$ | $p_m$ | HV na confirmação, média ± DP | HV nas 21 execuções, média ± DP | IGD+ nas 21 execuções | Tempo médio [s] |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `C09` | 56/8 | 1,0 | 30 | 10 | 1,00 | **0,847732 ± 0,001350** | **0,847420 ± 0,001784** | **0,002908** | **8,68** |
+| `C34` | 56/8 | 0,9 | 30 | 10 | 1,00 | 0,847253 ± 0,001396 | 0,847010 ± 0,001851 | 0,003009 | 8,79 |
+| `C22` | 56/8 | 0,7 | 10 | 40 | 1,00 | 0,846301 ± 0,002668 | 0,846203 ± 0,002687 | 0,003087 | 8,80 |
+| `C12` — referência | 24/20 | 0,9 | 20 | 20 | 0,50 | 0,840829 ± 0,006391 | 0,840268 ± 0,006844 | 0,005579 | 8,89 |
+| `C23` | 36/13 | 1,0 | 30 | 40 | 0,25 | 0,837136 ± 0,012886 | 0,830551 ± 0,018816 | 0,007285 | 8,95 |
+
+HV é o hipervolume normalizado e valores menores de IGD+ são melhores. `C09`
+foi a configuração recomendada: nas sementes de confirmação, seu HV médio foi
+0,006903 maior que o de `C12`, ganho relativo de 0,82%. Considerando as 21
+execuções, reduziu o IGD+ em 47,9%, reduziu o espaçamento em 54,2% (0,011978
+contra 0,026144) e foi 2,3% mais rápida. Sua frente final continha 56 pontos em
+todas as execuções, contra média de 23,24 para `C12`; essa última diferença
+também reflete a população maior, e não apenas melhor convergência.
+
+![Distribuição do hipervolume nas configurações confirmadas](img/nsga3_sensitivity_confirmation_boxplot.png)
+
+A figura usa as 21 execuções para mostrar a dispersão completa. A inferência
+abaixo, contudo, usa exclusivamente as 14 sementes que não participaram da
+triagem. Valores-p foram corrigidos em conjunto pelo método de Holm:
+
+| Comparação com `C12` | Diferença média de HV | IC bootstrap 95% | Wilcoxon $W$ | Valor-p de Holm | Correlação bisserial de postos |
+|---|---:|---:|---:|---:|---:|
+| `C09` − `C12` | 0,006903 | [0,003751; 0,010479] | 1 | **0,000977** | 0,980952 |
+| `C34` − `C12` | 0,006424 | [0,003289; 0,009840] | 2 | **0,001099** | 0,961905 |
+| `C22` − `C12` | 0,005472 | [0,001973; 0,009333] | 14 | **0,026855** | 0,733333 |
+| `C23` − `C12` | −0,003693 | [−0,011817; 0,003120] | 41 | 0,501587 | −0,219048 |
+
+Os três candidatos selecionados no topo da triagem superaram a referência na
+amostra reservada. Já `C23` não apresentou diferença significativa: seu HV
+médio aumentou na confirmação e permaneceu muito variável, um exemplo do
+motivo para separar seleção e confirmação.
+
+### Sensibilidade aos fatores
+
+No modelo bloqueado por semente, a probabilidade de mutação por variável foi o
+fator de maior influência, seguida pelo par população/gerações e pelo índice da
+mutação:
+
+| Fator | $F$ | Valor-p | $\eta^2$ parcial | Participação na soma de quadrados dos fatores |
+|---|---:|---:|---:|---:|
+| Probabilidade de mutação, $p_m$ | 18,979 | 2,30×10⁻⁸ | **0,1396** | 40,05% |
+| População/gerações | 10,366 | 1,97×10⁻⁶ | **0,1173** | 32,81% |
+| Índice da mutação, $\eta_m$ | 10,902 | 2,97×10⁻⁵ | **0,0852** | 23,00% |
+| Probabilidade de cruzamento, $p_c$ | 1,409 | 0,2464 | 0,0119 | 2,97% |
+| Índice do cruzamento, $\eta_c$ | 0,553 | 0,5761 | 0,0047 | 1,17% |
+
+![Efeitos principais dos hiperparâmetros](img/nsga3_sensitivity_main_effects.png)
+
+As médias marginais de HV passaram de 0,832559 em $p_m=0{,}25$ para 0,842597
+em $p_m=1{,}00$. Para população/gerações, foram 0,835390 (12/41), 0,838314
+(24/20), 0,836986 (36/13) e 0,843161 (56/8). Para $\eta_m$, o melhor nível
+marginal foi 10, com HV 0,842056, contra 0,837274 em 20 e 0,836059 em 40.
+Assim, dentro do orçamento fixo, mais candidatos por geração, mutação mais
+frequente e perturbações mais amplas favoreceram a cobertura da frente.
+
+Os efeitos marginais não devem ser lidos isoladamente: $p_c=0{,}7$ teve a maior
+média marginal, embora a melhor combinação use $p_c=1{,}0$. Nas interações
+exploratórias, população × $p_m$ ($p=0{,}0269$; $\eta^2_p=0{,}0601$) e
+$\eta_m$ × $p_m$ ($p=0{,}0423$; $\eta^2_p=0{,}0419$) foram as únicas com
+valor-p nominal inferior a 0,05. Esses testes não receberam correção por
+multiplicidade e servem como diagnóstico, não como confirmação independente.
+
+![Convergência média do hipervolume](img/nsga3_sensitivity_convergence.png)
+
+A recomendação `C09` é específica para estes dois objetivos, limites das
+variáveis e orçamento de 504 avaliações. O ponto de compromisso de pesos iguais
+permaneceu praticamente na mesma região física: `C09` produziu, em média,
+$N=5.195{,}9\pm144{,}6$ rpm, $\theta=-37{,}19\pm1{,}42^\circ$,
+$\eta_t=35{,}611\pm0{,}135$% e 15.417,8 ± 370,6 kW/kg; para `C12`, os valores
+foram 5.232,6 ± 208,2 rpm, −37,93 ± 2,94°, 35,566 ± 0,231% e
+15.504,6 ± 516,9 kW/kg. Portanto, o ajuste melhorou sobretudo a regularidade e
+a representação da frente, sem deslocar materialmente o compromisso físico.
+
+Uma avaliação do modelo que encerre a iteração politrópica sem convergência é
+registrada como ponto inviável e recebe desempenho nulo nos dois objetivos.
+Essa penalização é dominada por qualquer solução física válida, preserva o
+orçamento por configuração e não altera as tolerâncias do modelo.
+
+Os gráficos empregam escala de cinza, marcadores, padrões de preenchimento e
+tipos de linha redundantes para permanecerem interpretáveis em impressão preto
+e branco. Os resultados completos estão em:
+
+- [`reports/nsga3_sensitivity_design.csv`](reports/nsga3_sensitivity_design.csv):
+  as 36 configurações balanceadas;
+- [`reports/nsga3_sensitivity_runs.csv`](reports/nsga3_sensitivity_runs.csv):
+  métricas das 322 execuções;
+- [`reports/nsga3_sensitivity_summary.csv`](reports/nsga3_sensitivity_summary.csv):
+  resumo da triagem e das cinco configurações confirmadas;
+- [`reports/nsga3_sensitivity_factor_importance.csv`](reports/nsga3_sensitivity_factor_importance.csv),
+  [`reports/nsga3_sensitivity_main_effects.csv`](reports/nsga3_sensitivity_main_effects.csv) e
+  [`reports/nsga3_sensitivity_interactions.csv`](reports/nsga3_sensitivity_interactions.csv):
+  efeitos principais e interações;
+- [`reports/nsga3_sensitivity_pairwise_tests.csv`](reports/nsga3_sensitivity_pairwise_tests.csv):
+  testes pareados nas sementes reservadas;
+- [`reports/nsga3_sensitivity_pareto_solutions.csv`](reports/nsga3_sensitivity_pareto_solutions.csv),
+  [`reports/nsga3_sensitivity_reference_front.csv`](reports/nsga3_sensitivity_reference_front.csv) e
+  [`reports/nsga3_sensitivity_convergence.csv`](reports/nsga3_sensitivity_convergence.csv):
+  frentes e histórico de convergência;
+- [`reports/nsga3_sensitivity_best_configuration.csv`](reports/nsga3_sensitivity_best_configuration.csv):
+  resumo da configuração recomendada, calculado sobre 21 repetições.
+
 ## Interface Python
 
 `simulate_cycle` retorna o histórico termodinâmico completo. Para obter somente
@@ -581,6 +766,8 @@ print(dict(zip(OBJECTIVE_NAMES, objectives)))
   resultados e dez gráficos para impressão em preto e branco;
 - `src/multiobjective_optimization.py`: comparação reproduzível entre NSGA-II,
   NSGA-III, MOPSO e MOEA/D para maximizar eficiência e potência em 21 sementes;
+- `src/nsga3_sensitivity_analysis.py`: desenho balanceado, triagem, confirmação
+  independente e análise estatística dos hiperparâmetros do NSGA-III;
 - `data/data.csv`: coeficientes polinomiais das propriedades dos gases;
 - `img/`: artefatos gráficos gerados;
 - `reports/`: histórico e resumo do ponto de referência, resultados tabulares
@@ -591,6 +778,8 @@ print(dict(zip(OBJECTIVE_NAMES, objectives)))
 - `tests/test_ftha.py`: regressão e validação da interface do modelo.
 - `tests/test_multiobjective_optimization.py`: dominância, crowding, limites e
   agregação estatística do estudo multiobjetivo.
+- `tests/test_nsga3_sensitivity_analysis.py`: balanceamento, orçamento fixo,
+  seleção das finalistas e tabelas estatísticas da sensibilidade do NSGA-III.
 
 A localização do CSV e dos diretórios de saída é calculada a partir da raiz do
 projeto e não depende do diretório corrente usado para iniciar o Python.
@@ -606,6 +795,7 @@ uv run python -m src.article_validation
 uv run python -m src.base_case_analysis
 uv run python -m src.sensitivity_analysis
 uv run python -m src.multiobjective_optimization
+uv run python -m src.nsga3_sensitivity_analysis
 uv run python -c "from src.FTHA import objective_function; print(objective_function([4500, -48]))"
 ```
 

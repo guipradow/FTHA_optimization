@@ -335,6 +335,7 @@ dependencies = [
     { name = "pandas" },
     { name = "pymoo" },
     { name = "pyswarm" },
+    { name = "scipy" },
 ]
 
 [package.metadata]
@@ -347,6 +348,7 @@ requires-dist = [
     { name = "pandas", specifier = ">=3.0.3" },
     { name = "pymoo", specifier = ">=0.6.2" },
     { name = "pyswarm", specifier = ">=1.0.0" },
+    { name = "scipy", specifier = ">=1.18.0" },
 ]
 
 [[package]]
