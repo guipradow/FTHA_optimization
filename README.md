@@ -386,6 +386,167 @@ não apenas respostas a serem minimizadas isoladamente.
 
 ![Temperatura máxima na análise de sensibilidade](img/maximum_temperature_vs_engine_speed.png)
 
+## Otimização multiobjetivo de eficiência e potência
+
+O estudo resolve simultaneamente as duas otimizações propostas,
+
+$$
+\max_{N,\theta}\;\eta_t(N,\theta)
+\qquad\text{e}\qquad
+\max_{N,\theta}\;\dot{w}_{liq}(N,\theta),
+$$
+
+sem reduzir o problema a uma única soma ponderada global. O resultado de cada
+execução é, portanto, uma aproximação da frente de Pareto: melhorar um dos
+indicadores exige aceitar perda no outro.
+
+### Domínio e modelo termodinâmico
+
+As variáveis contínuas são $500\leq N\leq10.000$ rpm e
+$-120^\circ\leq\theta\leq0^\circ$. Esses limites preservam integralmente o domínio
+exploratório do `e2.2_case_study.ipynb`; não devem ser interpretados como mapa de
+calibração de um motor comercial específico. A faixa superior de rotação e a
+dependência do avanço com $N$ são compatíveis com ensaios de motores SI — por
+exemplo, [Y, Khoa e Lim (2021)](https://doi.org/10.3390/en14154523) estudaram
+3.000–10.000 rpm e avanços de 10–45° —, mas o limite de 120° é deliberadamente
+mais amplo porque o FTHA impõe uma duração temporal de combustão constante.
+
+Com $\Delta t_c=2{,}5$ ms, a duração angular é
+$\delta=6N\Delta t_c$, variando de 7,5° a 150°. Os limites escolhidos mantêm
+$\theta+\delta\leq180^\circ$ em todo o domínio. Volume deslocado, número de
+cilindros, $L/R$, taxa de compressão, estado inicial, $q_{in}$, CO₂, tolerâncias
+e malha são exatamente os parâmetros do artigo já listados no ponto de
+referência. Cada avaliação chama diretamente o modelo termodinâmico com 90
+intervalos antes e depois da adição de calor e passo de 0,5° durante a
+combustão; não foi usado metamodelo ou interpolação.
+
+As decisões são normalizadas em $[0,1]^2$ para os operadores não privilegiarem
+a rotação apenas por sua escala numérica. Para o mesmo motivo, as funções de
+minimização fornecidas aos algoritmos são $-\eta_t/40\%$ e
+$-\dot{w}_{liq}/27.000$, escalas fixas arredondadas acima dos máximos da análise
+de sensibilidade. Escala positiva não altera dominância de Pareto.
+
+### Algoritmos, frameworks e parâmetros
+
+Foram comparados quatro métodos, sempre com 24 candidatos, 20 gerações além da
+população inicial e **504 avaliações exatas por execução**. Cada método foi
+executado 21 vezes com sementes independentes e reproduzíveis; assim, o estudo
+totaliza 84 execuções e 42.336 chamadas do ciclo FTHA. O tamanho 24 fornece boa
+cobertura para apenas dois objetivos e duas decisões, é múltiplo de quatro
+exigido pelo torneio DCD do NSGA-II e mantém viável a repetição estatística do
+modelo termodinâmico. O orçamento idêntico é mais importante para esta
+comparação que reproduzir populações muito maiores usadas em funções-teste
+baratas dos artigos originais.
+
+| Método | Implementação e escolhas |
+|---|---|
+| NSGA-II | [DEAP `selNSGA2`](https://deap.readthedocs.io/en/master/api/tools.html#deap.tools.selNSGA2), torneio DCD e elitismo; SBX com $p_c=0{,}9$ e $\eta_c=20$; mutação polinomial com $\eta_m=20$ e probabilidade $1/n_{var}=0{,}5$ por variável. Segue os operadores reais do [NSGA-II de Deb et al.](https://doi.org/10.1109/4235.996017). |
+| NSGA-III | [DEAP `selNSGA3`](https://deap.readthedocs.io/en/stable/examples/nsga3.html), os mesmos operadores do NSGA-II e 24 pontos de referência uniformes ($p=23$). O método foi proposto para muitos objetivos por [Deb e Jain](https://doi.org/10.1109/TEVC.2013.2281535); aqui sua inclusão em duas dimensões é comparativa, não uma alegação de vantagem esperada. |
+| MOPSO | O [PySwarm 1.0](https://pypi.org/project/pyswarm/) fornece PSO escalar. Sua equação e padrões $\omega=c_1=c_2=0{,}5$ foram estendidos com dominância, repositório externo de até 96 soluções e líderes favorecidos por menor densidade, conforme o [MOPSO de Coello Coello e Lechuga](https://doi.org/10.1109/CEC.2002.1004388). Uma perturbação de probabilidade inicial 0,10, decrescente até zero, reduz estagnação. |
+| MOEA/D | [`MOEAD` do pymoo](https://pymoo.org/algorithms/moo/moead.html), 24 direções uniformes, decomposição de Tchebycheff, 10 vizinhos e probabilidade 0,9 de acasalamento na vizinhança; SBX e mutação iguais aos métodos DEAP. A decomposição e cooperação local seguem [Zhang e Li](https://doi.org/10.1109/TEVC.2007.892759). |
+
+As versões, sementes e todos os hiperparâmetros estão registrados de forma
+legível por máquina em
+[`reports/multiobjective_configuration.csv`](reports/multiobjective_configuration.csv).
+
+### Estatísticas e critério de melhor solução
+
+Uma frente não possui uma única “melhor” solução sem preferência externa. Para
+calcular média e desvio padrão de decisões e respostas, cada execução fornece
+um ponto de compromisso: primeiro calculam-se ideal e nadir da frente não
+dominada combinada das 84 execuções; em seguida escolhe-se a menor distância
+euclidiana ao ideal, com perdas de eficiência e potência normalizadas pelo
+intervalo ideal–nadir e pesos iguais. A melhor solução de cada algoritmo é o
+menor valor desse mesmo escore entre todas as suas frentes.
+
+O hipervolume usa a referência física $(\eta_t,\dot{w}_{liq})=(0,0)$ após as
+escalas fixas. Valores maiores indicam simultaneamente melhor convergência e
+cobertura. O tempo contém seleção e as 504 avaliações exatas, mas não a criação
+inicial do conjunto de processos, compartilhado por todo o experimento. O
+paralelismo altera apenas o tempo: sementes, avaliações e resultados não
+dependem da ordem de conclusão das tarefas.
+
+### Resultados das 21 execuções
+
+As 84 execuções concluíram as 42.336 avaliações previstas, sem ponto inválido ou
+falha de convergência. Média e desvio padrão das métricas de qualidade e custo
+foram:
+
+| Algoritmo | Hipervolume médio ± DP | Melhor hipervolume | Tempo médio ± DP [s] |
+|---|---:|---:|---:|
+| NSGA-II | **0,84463 ± 0,00292** | 0,84755 | 9,64 ± 1,11 |
+| NSGA-III | 0,84293 ± 0,00269 | 0,84616 | 9,86 ± 1,01 |
+| MOPSO | 0,83867 ± 0,01387 | **0,85007** | **9,27 ± 0,80** |
+| MOEA/D | 0,82660 ± 0,01048 | 0,84052 | 34,31 ± 1,85 |
+
+O NSGA-II apresentou o maior hipervolume médio e baixa dispersão; o NSGA-III
+ficou 0,20% abaixo em média e teve dispersão semelhante. O MOPSO encontrou a
+melhor frente isolada e foi o mais rápido, mas três execuções de qualidade
+inferior aumentaram seu desvio; sua mediana foi 0,84557. O MOEA/D convergiu para
+frentes úteis, porém obteve hipervolume médio 2,13% abaixo do NSGA-II e levou
+3,56 vezes mais tempo. Esse custo decorre da atualização sequencial dos
+subproblemas vizinhos na implementação do pymoo, que aproveita menos o
+paralelismo entre avaliações.
+
+O MOPSO pode devolver até 96 membros de seu repositório, enquanto os outros
+métodos devolvem no máximo 24 membros da população. O hipervolume foi calculado
+sobre a saída completa de cada método; portanto, ele mede a frente efetivamente
+entregue ao usuário, mas parte da vantagem de densidade de uma execução MOPSO
+decorre dessa memória externa. A conclusão mais robusta é a estabilidade do
+NSGA-II, não superioridade universal de um algoritmo.
+
+Os pontos de compromisso de pesos iguais apresentaram as seguintes médias
+entre sementes:
+
+| Algoritmo | $N$ médio ± DP [rpm] | $\theta$ médio ± DP [°] | $\eta_t$ média ± DP [%] | Potência média ± DP [kW/kg] |
+|---|---:|---:|---:|---:|
+| NSGA-II | 5.169 ± 255 | −36,86 ± 2,34 | 35,632 ± 0,229 | 15.344,8 ± 657,9 |
+| NSGA-III | 5.199 ± 189 | −37,44 ± 2,17 | 35,602 ± 0,176 | 15.421,9 ± 483,6 |
+| MOPSO | **5.234 ± 82** | **−37,73 ± 0,76** | **35,586 ± 0,076** | **15.522,2 ± 209,7** |
+| MOEA/D | 5.445 ± 455 | −38,69 ± 5,24 | 35,337 ± 0,407 | 16.018,4 ± 1.154,1 |
+
+O negrito na linha do MOPSO destaca a menor dispersão, e não o maior valor de
+cada objetivo. Os quatro métodos localizaram a mesma região de compromisso,
+aproximadamente 5.200 rpm e 38° antes do PMS. O MOEA/D tendeu a selecionar mais
+potência com alguma perda de eficiência e apresentou a maior variabilidade.
+
+As melhores soluções de compromisso — menor distância normalizada ao ideal —
+foram:
+
+| Algoritmo | Execução | $N$ [rpm] | $\theta$ [°] | $\eta_t$ [%] | Potência [kW/kg] | Escore |
+|---|---:|---:|---:|---:|---:|---:|
+| NSGA-II | 15 | 5.217,6 | −38,116 | 35,599 | 15.478,7 | 0,398572 |
+| NSGA-III | 14 | 5.201,4 | −37,439 | 35,617 | 15.438,2 | 0,398393 |
+| MOPSO | 14 | 5.230,3 | −37,596 | 35,591 | 15.512,4 | **0,398370** |
+| MOEA/D | 8 | 5.304,6 | −37,389 | 35,519 | 15.701,0 | 0,398735 |
+
+As diferenças entre esses escores são pequenas: não há evidência de que uma
+dessas quatro alternativas de compromisso domine as demais. A escolha final
+depende da preferência entre eficiência e potência. Nos extremos da frente
+conjunta, a maior eficiência foi 38,435% em 500 rpm e −3,582°, com
+1.601,4 kW/kg; a maior potência foi 25.675,9 kW/kg em 9.999,9 rpm e −70,873°,
+com eficiência de 30,811%. Esses extremos refinam os valores da varredura
+discreta e confirmam o conflito entre os objetivos.
+
+![Frentes de Pareto das melhores execuções](img/multiobjective_pareto_front.png)
+
+A figura mostra a execução de maior hipervolume de cada método. Padrões de
+traço e marcadores redundantes mantêm as quatro frentes distinguíveis em
+impressão preto e branco.
+
+![Distribuição do tempo das 21 execuções](img/multiobjective_runtime_boxplot.png)
+
+Os resultados completos podem ser auditados em:
+
+- [`reports/multiobjective_pareto_solutions.csv`](reports/multiobjective_pareto_solutions.csv):
+  3.414 soluções não dominadas, com semente e execução;
+- [`reports/multiobjective_run_statistics.csv`](reports/multiobjective_run_statistics.csv):
+  84 linhas com hipervolume, ponto de compromisso e tempo;
+- [`reports/multiobjective_summary.csv`](reports/multiobjective_summary.csv):
+  médias, desvios padrão e melhor solução por algoritmo;
+- [`reports/multiobjective_best_solutions.csv`](reports/multiobjective_best_solutions.csv):
+  os quatro compromissos destacados na tabela anterior.
+
 ## Interface Python
 
 `simulate_cycle` retorna o histórico termodinâmico completo. Para obter somente
@@ -418,13 +579,18 @@ print(dict(zip(OBJECTIVE_NAMES, objectives)))
 - `src/sensitivity_analysis.py`: ponto de referência e varredura de rotação e
   instante de ignição com os demais parâmetros do artigo, exportação dos
   resultados e dez gráficos para impressão em preto e branco;
+- `src/multiobjective_optimization.py`: comparação reproduzível entre NSGA-II,
+  NSGA-III, MOPSO e MOEA/D para maximizar eficiência e potência em 21 sementes;
 - `data/data.csv`: coeficientes polinomiais das propriedades dos gases;
 - `img/`: artefatos gráficos gerados;
 - `reports/`: histórico e resumo do ponto de referência, resultados tabulares
-  da varredura e resumo dos extremos da análise de sensibilidade;
+  da varredura, frentes de Pareto, estatísticas por execução e resumo da
+  otimização;
 - `tests/test_article_validation.py`: regressão numérica dos seis casos
   publicados;
 - `tests/test_ftha.py`: regressão e validação da interface do modelo.
+- `tests/test_multiobjective_optimization.py`: dominância, crowding, limites e
+  agregação estatística do estudo multiobjetivo.
 
 A localização do CSV e dos diretórios de saída é calculada a partir da raiz do
 projeto e não depende do diretório corrente usado para iniciar o Python.
@@ -439,6 +605,7 @@ uv run python -m unittest discover -s tests
 uv run python -m src.article_validation
 uv run python -m src.base_case_analysis
 uv run python -m src.sensitivity_analysis
+uv run python -m src.multiobjective_optimization
 uv run python -c "from src.FTHA import objective_function; print(objective_function([4500, -48]))"
 ```
 
@@ -449,3 +616,29 @@ uv run python -c "from src.FTHA import objective_function; print(objective_funct
   v. 45, n. 2, p. 103–119, 2017. DOI: 10.1177/0306419016689447.
 - ÇENGEL, Y. A.; BOLES, M. A. *Termodinâmica*. 7ª ed. Porto Alegre: Grupo A,
   2013.
+- Y, Quach Nhu; KHOA, Nguyen-Xuan; LIM, Ock Taeck. A study on the effect of
+  ignition timing on residual gas, effective release energy, and engine
+  emissions of a V-twin engine. *Energies*, v. 14, n. 15, 4523, 2021.
+  DOI: [10.3390/en14154523](https://doi.org/10.3390/en14154523).
+- DEB, Kalyanmoy et al. A fast and elitist multiobjective genetic algorithm:
+  NSGA-II. *IEEE Transactions on Evolutionary Computation*, v. 6, n. 2,
+  p. 182–197, 2002. DOI:
+  [10.1109/4235.996017](https://doi.org/10.1109/4235.996017).
+- DEB, Kalyanmoy; JAIN, Himanshu. An evolutionary many-objective optimization
+  algorithm using reference-point-based nondominated sorting approach, part I.
+  *IEEE Transactions on Evolutionary Computation*, v. 18, n. 4, p. 577–601,
+  2014. DOI:
+  [10.1109/TEVC.2013.2281535](https://doi.org/10.1109/TEVC.2013.2281535).
+- COELLO COELLO, Carlos A.; LECHUGA, Maximino Salazar. MOPSO: a proposal for
+  multiple objective particle swarm optimization. In: *Congress on
+  Evolutionary Computation*, 2002. DOI:
+  [10.1109/CEC.2002.1004388](https://doi.org/10.1109/CEC.2002.1004388).
+- ZHANG, Qingfu; LI, Hui. MOEA/D: a multiobjective evolutionary algorithm based
+  on decomposition. *IEEE Transactions on Evolutionary Computation*, v. 11,
+  n. 6, p. 712–731, 2007. DOI:
+  [10.1109/TEVC.2007.892759](https://doi.org/10.1109/TEVC.2007.892759).
+- FORTIN, Félix-Antoine et al. DEAP: evolutionary algorithms made easy.
+  *Journal of Machine Learning Research*, v. 13, p. 2171–2175, 2012.
+- BLANK, Julian; DEB, Kalyanmoy. pymoo: multi-objective optimization in Python.
+  *IEEE Access*, v. 8, p. 89497–89509, 2020. DOI:
+  [10.1109/ACCESS.2020.2990567](https://doi.org/10.1109/ACCESS.2020.2990567).
