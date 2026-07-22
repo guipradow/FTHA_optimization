@@ -1,0 +1,678 @@
+\documentclass[a4paper,11pt]{article}
+\usepackage{sbpo-template}
+%\usepackage[latin1]{inputenc}
+\usepackage[brazil]{babel}    % português do Brasil
+\usepackage[utf8]{inputenc}   % acentos no UTF-8
+\usepackage[T1]{fontenc}      % para hifenização correta
+\usepackage{amsmath,amssymb}
+\usepackage{url}
+\usepackage[square]{natbib}
+\usepackage{indentfirst}
+\usepackage{fancyhdr}
+\usepackage{graphicx}
+\graphicspath{{./}{../img/}}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[C]{\includegraphics[scale=0.5]{sbpo2026-header-logo.png}}
+%\renewcommand{\headrulewidth}{0pt}
+\providecommand{\headruleskip}{0pt}
+\renewcommand{\headruleskip}{-1mm}
+%\setlength\headheight{101.0pt}
+%\addtolength{\textheight}{-101.0pt}
+\setlength\headheight{86pt}
+\addtolength{\textheight}{-86pt}
+\setlength{\headsep}{5mm}
+\setlength{\footskip}{4.08003pt}
+
+\begin{document}
+
+\title{APLICAÇÃO E CALIBRAÇÃO DO NSGA-III NA OTIMIZAÇÃO MULTIOBJETIVO DE UM MODELO OTTO COM ADIÇÃO FINITA DE CALOR}
+
+\maketitle
+\thispagestyle{fancy}
+
+\author{
+\name{Felipe Gubaua Portes}
+\institute{Universidade Tecnológica Federal do Paraná - UTFPR}
+\iaddress{Av. Sete de Setembro, 3165 - Rebouças, Curitiba - PR, 80230-901}
+\email{felipegubaua@alunos.utfpr.edu.br}
+}
+
+\author{
+\name{Guilherme de Paula Prado}
+\institute{Universidade Tecnológica Federal do Paraná - UTFPR}
+\iaddress{Av. Sete de Setembro, 3165 - Rebouças, Curitiba - PR, 80230-901}
+\email {guilhermeprado@alunos.utfpr.edu.br}
+}
+
+\vspace{8mm}
+\begin{resumo}
+Este trabalho propõe a aplicação e a calibração do NSGA-III na otimização
+simultânea da eficiência térmica e da potência líquida específica de um modelo
+Otto com adição finita de calor, empregando NSGA-II, MOPSO e MOEA/D como
+métodos de referência. A implementação reproduziu, na precisão publicada, as
+eficiências dos seis casos do artigo-base. Em 21 execuções com 504 avaliações,
+a configuração-base do NSGA-III obteve hipervolume médio de 0,84293, 0,20\%
+abaixo do NSGA-II; o MOPSO produziu a melhor execução isolada e o menor tempo
+médio. A análise de 36 combinações identificou C09, com 56 indivíduos e oito
+gerações, que elevou o hipervolume em 0,82\% frente à referência C12 nas
+sementes reservadas. Os resultados confirmam o conflito entre os objetivos e
+sustentam a aplicação calibrada do NSGA-III, sem estabelecer superioridade
+estatística sobre os benchmarks.
+\end{resumo}
+
+\bigskip
+\begin{palchaves}
+NSGA-III, Otimização Multiobjetivo, Motor Otto.
+
+\bigskip
+\noindent{Tópicos (MH – Meta-heurísticas, MCD – Métodos Multicritério para Ajuda de Tomada de Decisão)}
+\end{palchaves}
+
+
+\vspace{8mm}
+
+\begin{abstract}
+This study proposes the application and hyperparameter calibration of NSGA-III
+for the simultaneous optimization of thermal efficiency and net specific power
+in a finite-time heat-addition Otto engine model, using NSGA-II, MOPSO, and
+MOEA/D as benchmark methods. The implementation reproduced all six reference
+efficiencies at the published precision. Across 21 runs with 504 evaluations,
+the baseline NSGA-III achieved a mean hypervolume of 0.84293, 0.20\% below
+NSGA-II; MOPSO produced the best individual run and the lowest mean runtime. A
+sensitivity analysis of 36 configurations identified C09, with 56 individuals
+and eight generations, which increased hypervolume by 0.82\% relative to the
+C12 baseline on held-out seeds. The results confirm the trade-off between the
+objectives and support the calibrated application of NSGA-III without
+establishing statistical superiority over the benchmarks.
+\end{abstract}
+
+\bigskip
+\begin{keywords}
+NSGA-III, Multiobjective Optimization, Otto Engine.
+
+\bigskip
+\noindent{Paper topics (MH – Metaheuristics, MCD – Multicriteria Decision Making)}
+\end{keywords}
+
+
+\newpage
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Introdução}
+
+\subsection{Contexto}
+
+Modelos termodinâmicos são muito utilizados para analisar o desempenho de motores de combustão interna. Esses modelos podem avaliar a influência de parâmetros de projeto e operação sobre variáveis como eficiência térmica, potência e pressão máxima. Nesse contexto, \citet{naaktgeboren2017} propôs o modelo de motor Otto com adição finita de calor, no qual a combustão ocorre de maneira distribuída ao longo do ângulo do virabrequim, possibilitando uma representação mais próxima ao funcionamento real do motor.
+
+
+\subsection{Problema}
+
+Apesar de o modelo de \citet{naaktgeboren2017} representar de forma mais realista o processo de combustão, os experimentos apresentados restringem-se à análise de sensibilidade de parâmetros. Nessa abordagem, as variáveis de entrada são alteradas manualmente e avaliadas individualmente, mantendo os demais parâmetros constantes.
+
+Como o desempenho do motor depende da interação simultânea entre diversas variáveis de projeto e operação, torna-se inviável explorar exaustivamente todas as combinações possíveis \citep{naaktgeboren2017}. Sendo assim, surge a necessidade de métodos de otimização capazes de identificar automaticamente configurações dos parâmetros do motor que maximizem simultaneamente a eficiência térmica e a potência líquida específica \citep{deb2011}.
+
+\subsection{Justificativa}
+
+A otimização simultânea da eficiência térmica e da potência líquida específica caracteriza um problema multiobjetivo. A seleção por pontos de referência torna o NSGA-III uma alternativa para distribuir soluções ao longo da fronteira eficiência--potência e oferece uma estrutura extensível a objetivos futuros. Como o problema atual possui apenas dois objetivos, sua adequação ao modelo deve ser avaliada empiricamente; por isso, NSGA-II, MOPSO e MOEA/D são adotados como benchmarks representativos de estratégias baseadas em aglomeração, enxame e decomposição \citep{deb2011,hua2021survey}.
+
+\subsection{Objetivo}
+
+Aplicar e calibrar o NSGA-III na otimização multiobjetivo dos parâmetros do modelo de motor Otto com adição finita de calor de \citet{naaktgeboren2017}, contextualizando seu desempenho frente aos benchmarks NSGA-II, MOPSO e MOEA/D sob orçamento computacional comum.
+
+\subsection{Organização do artigo}
+
+O restante deste artigo está organizado da seguinte maneira: a Seção~\ref{sec:revisao} apresenta a revisão da literatura; a Seção~\ref{sec:metodos} descreve os materiais e métodos empregados ao longo do estudo; a Seção~\ref{sec:resultados} apresenta e discute os resultados; e, por fim, a Seção~\ref{sec:conclusoes} reúne as conclusões obtidas e as sugestões de trabalhos futuros.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Revisão da Literatura}\label{sec:revisao}
+
+\subsection{Motores Otto e Modelagem Termodinâmica}
+
+O ciclo Otto é um modelo idealizado utilizado para representar o funcionamento de motores de combustão interna com ignição por centelha. Em sua formulação clássica, a compressão e a expansão são consideradas isentrópicas, enquanto a adição e a rejeição de calor ocorrem a volume constante \citep{naaktgeboren2017}.
+
+Embora essas assunções simplifiquem a análise, elas limitam a representação do modelo, tornando-o um tanto distante do funcionamento real de um motor \citep{curto2008}. Por esse motivo, diferentes estudos ao longo do tempo buscam propor modelos mais avançados, que incorporam efeitos como combustão não instantânea, transferência de calor e irreversibilidades .
+
+Nesse viés, \citet{curto2008} analisaram modelos teóricos e simulados de um ciclo Otto irreversível, considerando perdas e efeitos que são simplificados pelo ciclo ideal. Esses modelos permitem representar com maior fidelidade o comportamento termodinâmico do motor \citep{curto2008}. Outra abordagem, apresentada por \citet{naaktgeboren2017}, propôs um modelo de motor Otto com adição finita de calor. Nesse modelo, a liberação de calor ocorre durante um intervalo do ângulo do virabrequim, permitindo considerar simultaneamente a entrada de calor e o trabalho realizado pelo deslocamento do pistão. Assim, é possível calcular grandezas como eficiência térmica, trabalho líquido, pressão máxima e temperatura ao final da expansão \citep{naaktgeboren2017}.
+
+
+\subsection{Otimização Multiobjetivo}
+
+Problemas de otimização multiobjetivo envolvem a otimização simultânea de duas ou mais funções objetivo, que podem ser conflitantes entre si. Esses problemas podem ser representados pela Equação~\ref{eq:multiobjetivo} a seguir,  na qual $\mathbf{x}$ corresponde ao vetor de variáveis de decisão, $\Omega$ representa o espaço de soluções viáveis (ou seja, considera as restrições de funcionamento) e $f_i(\mathbf{x})$ corresponde à $i$-ésima função objetivo a ser otimizada \citep{deb2011,hua2021survey}.
+
+\begin{equation}
+    \underset{\mathbf{x} \in \Omega}{\operatorname{otimizar}}
+    \quad
+    \mathbf{F}(\mathbf{x}) =
+    \left[
+        f_1(\mathbf{x}),
+        f_2(\mathbf{x}),
+        \ldots,
+        f_m(\mathbf{x})
+    \right].
+    \label{eq:multiobjetivo}
+\end{equation}
+
+Em problemas desse gênero, as soluções são comparadas pelo conceito de dominância de Pareto. Isso ocorre devido ao fato de não existir uma única solução capaz de apresentar o melhor desempenho em todos os objetivos a serem analisados. A partir dessa abordagem, considera-se que uma solução domina outra quando apresenta desempenho igual ou superior em todos os objetivos e desempenho estritamente superior em pelo menos um deles \citep{deb2011}.
+
+Quando uma solução não é dominada por nenhuma outra solução viável, ela passa a fazer parte do conjunto de Pareto. Assim, sua representação no espaço dos objetivos é denominada fronteira de Pareto. Essa fronteira reúne soluções que expressam diferentes relações de equilíbrio entre os objetivos do problema \citep{deb2011,hua2021survey}.
+
+\subsection{NSGA-III e algoritmos de referência}
+
+Metaheurísticas multiobjetivo buscam aproximar o conjunto de soluções não dominadas em uma única execução do algoritmo. Isso é realizado por meio da conciliação de dois aspectos principais: a convergência em direção à fronteira de Pareto e a diversidade das soluções encontradas. Não há um método absoluto definido como melhor para todas as aplicações, a escolha depende das especificidades de cada uma. Isso porque cada método possui diferentes abordagens para conduzir a busca, selecionar soluções e preservar a diversidade da população, sendo necessário o estudo das possibilidades \citep{deb2011,hua2021survey}.
+
+O NSGA-II (\textit{Non-dominated Sorting Genetic Algorithm II}) é um algoritmo evolutivo que se baseia na classificação das possíveis soluções em diferentes níveis de dominância. O método usa \textit{crowding distance} para estimar a densidade de soluções em cada região do espaço dos objetivos. Por meio dessa abordagem, ele busca favorecer indivíduos localizados em áreas menos exploradas, contribuindo assim para a diversidade da fronteira obtida \citep{deb2002}.
+
+O NSGA-III (\textit{Non-dominated Sorting Genetic Algorithm III}) estende o NSGA-II e substitui a preservação de diversidade por \textit{crowding distance} por uma seleção baseada em pontos de referência. Embora concebido para problemas com muitos objetivos, seu emprego neste problema biobjetivo é tratado como questão empírica. Durante a seleção ambiental, as soluções são associadas aos pontos de referência para favorecer sua distribuição no espaço dos objetivos \citep{deb2014nsga3}.
+
+Uma variação do PSO (Particle Swarm Optimization), o MOPSO (Multi-Objective Particle Swarm Optimization) adapta o método original para problemas de caráter multiobjetivo. Nesse método, cada partícula atualiza sua posição com base na própria experiência individual e em líderes selecionados entre as soluções não dominadas armazenadas em um repositório externo. Esse mecanismo orienta a busca por novas soluções possíveis, e contribui para preservar a diversidade entre as soluções encontradas \citep{coello2004mopso}.
+
+Por fim, o MOEA/D (\textit{Multiobjective Evolutionary Algorithm Based on Decomposition}) transforma um problema multiobjetivo em um conjunto de subproblemas escalares. Cada subproblema possui um vetor de pesos e é otimizado simultaneamente aos demais, permitindo o compartilhamento de informações entre soluções vizinhas e a exploração de diferentes regiões da fronteira de Pareto \citep{zhang2007moead}.
+
+Neste estudo, o NSGA-III constitui a abordagem principal, por empregar pontos de referência para preservar a distribuição das soluções e permitir extensão natural a mais objetivos. NSGA-II, MOPSO e MOEA/D fornecem benchmarks com mecanismos distintos de seleção e diversidade, contextualizando o desempenho do NSGA-III sem pressupor sua superioridade.
+
+\subsection{Métricas de Desempenho}
+\label{subsec:metricas-desempenho}
+
+Para a avaliação de algoritmos multiobjetivo, tanto a proximidade das soluções em relação à fronteira de Pareto quanto sua distribuição ao longo do espaço dos objetivos é importante \citep{deb2011}. Nesse cenário, o hipervolume (\textit{Hypervolume} -- HV) é uma métrica amplamente empregada.
+
+O HV corresponde ao volume da região do espaço dos objetivos dominada pelo conjunto de soluções e limitada por um ponto de referência. Normalmente, valores maiores sugerem melhor convergência e maior cobertura da fronteira de Pareto \citep{deb2011}.
+
+\subsection{Trabalhos Relacionados}
+
+Na linha histórica da modelagem de motores de combustão interna, \citet{curto2008} desenvolveram modelos teóricos e simulados para um ciclo Otto irreversível, já considerando efeitos anteriormente simplificados na formulação ideal. Anos depois, \citet{naaktgeboren2017} propôs um modelo com adição finita de calor, no qual o ciclo é discretizado em subprocessos politrópicos e a combustão ocorre ao longo de um intervalo do ângulo do virabrequim. No entanto, uma lacuna encontrada nesse último estudo consiste no fato de que ele se concentra em análises de sensibilidade, e não na otimização simultânea dos parâmetros do modelo proposto.
+
+No âmbito de otimizar os parâmetros do modelo de motores de combustão interna, \citet{he2021} analisaram o ciclo Otto ideal. Por meio desse estudo, eles determinaram a taxa de compressão ótima para maximizar o trabalho específico e a pressão média efetiva. Esse estudo de otimização, contudo, foi baseado no modelo do ciclo Otto ideal, e analisou a otimização de um critério de desempenho por vez, não tratando-o como um problema multiobjetivo.
+
+Sendo assim, o presente estudo aplica e calibra o NSGA-III no modelo de motor Otto com adição finita de calor de \citet{naaktgeboren2017}, visando maximizar simultaneamente eficiência térmica e potência líquida específica. NSGA-II, MOPSO e MOEA/D são executados sob as mesmas condições como referências de desempenho.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Materiais e Métodos}\label{sec:metodos}
+
+O procedimento compreendeu a reprodução dos casos publicados, a formulação do
+problema, o benchmark da configuração-base do NSGA-III e a análise de
+sensibilidade de seus hiperparâmetros. O NSGA-III é a abordagem principal por ser o
+objeto da calibração, e não por pressuposição de superioridade.
+
+\subsection{Modelo termodinâmico e verificação numérica}
+\label{subsec:modelo-termodinamico}
+
+Adotou-se o modelo ar-padrão de adição finita de calor de
+\citet{naaktgeboren2017}, representado como sistema fechado, com gás ideal,
+processos internamente reversíveis e sem perdas por atrito, vazamento ou queda
+de pressão. A geometria instantânea é calculada pelo mecanismo
+biela--manivela. Nesta implementação, $c_p(T)$ do CO$_2$ é cúbico,
+$c_v(T)=c_p(T)-R_g$ e $u(T)=\int c_v(T)\,dT$. O artigo-base emprega uma
+correlação termofísica de quinta ordem; compara-se, portanto, a resposta na
+resolução publicada, não a identidade do submodelo de propriedades.
+
+A fração acumulada de calor liberado é
+\begin{equation}
+y(\alpha)=
+\begin{cases}
+0, & \alpha < \theta, \\[1mm]
+\dfrac{1}{2}-\dfrac{1}{2}
+\cos\!\left[\dfrac{\pi}{\delta}(\alpha-\theta)\right],
+& \theta \leq \alpha \leq \theta+\delta, \\[2mm]
+1, & \alpha > \theta+\delta,
+\end{cases}
+\label{eq:liberacao-calor}
+\end{equation}
+em que $\alpha$ é o ângulo do virabrequim, $\theta$ o instante de ignição e
+$\delta$ a duração angular da adição de calor. Em cada intervalo,
+\begin{equation}
+q_i=q_{\mathrm{in}}\,[y(\alpha_{i+1})-y(\alpha_i)],
+\qquad
+u_{i+1}=u_i+q_i+w_i^{\mathrm{on}},
+\label{eq:primeira-lei}
+\end{equation}
+onde $w_i^{\mathrm{on}}$ é positivo quando recebido pelo gás. Aplicam-se ainda
+$Pv=R_gT$ e $Pv^{n_i}=C_i$. O expoente politrópico $n_i$ é atualizado até que
+a diferença entre duas estimativas sucessivas do trabalho seja inferior a
+$10^{-8}$ kJ/kg, com limite de 100 iterações; intervalos de volume constante
+são tratados como isocóricos.
+
+Os indicadores são
+\begin{equation}
+\eta_t=\frac{w_{\mathrm{liq}}}{q_{\mathrm{in}}},
+\qquad
+w_{\mathrm{liq}}=w_{\mathrm{exp}}-w_{\mathrm{comp}},
+\qquad
+\dot w_{\mathrm{liq}}=w_{\mathrm{liq}}\frac{N}{120},
+\label{eq:indicadores}
+\end{equation}
+sendo o último termo a potência líquida específica de um motor de quatro
+tempos. Também se registram razão de consumo de trabalho, pressão e temperatura
+máximas.
+
+A implementação foi comparada às eficiências dos seis testes paramétricos de
+\citet{naaktgeboren2017}. Fixaram-se $r=12$, $\theta=-5^\circ$,
+$T_{\mathrm{in}}=300$ K, $P_{\mathrm{in}}=100$ kPa,
+$q_{\mathrm{in}}=1\,000$ kJ/kg, CO$_2$, $L/R=5$ e volume deslocado de
+250 cm$^3$, variando-se somente
+$\delta\in\{10^\circ,30^\circ,50^\circ,70^\circ,90^\circ,110^\circ\}$.
+Foram usados 90 intervalos antes e depois da adição de calor e passo de
+$0{,}5^\circ$ durante esse processo. Como as eficiências de referência têm três
+algarismos significativos (uma casa decimal), definiu-se concordância pela
+igualdade após arredondamento à resolução publicada de 0,1 ponto percentual.
+
+\subsection{Caso de estudo e formulação multiobjetivo}
+\label{subsec:formulacao-problema}
+
+Após essa reprodução, manteve-se a configuração da implementação local e
+definiu-se $\Delta t_c=2{,}5$ ms. A duração angular passa a depender da rotação,
+\begin{equation}
+\delta=\omega\Delta t_c,\qquad
+\omega=\frac{2\pi N}{60},
+\quad\text{ou}\quad
+\delta[^\circ]=6N\Delta t_c,
+\label{eq:duracao-angular}
+\end{equation}
+com $N$ em rpm e $\Delta t_c$ em segundos. O caso de referência usa
+$N=4\,800$ rpm e $\theta=-15^\circ$, portanto $\delta=72^\circ$. Uma varredura
+preliminar avaliou 120 combinações: 20 rotações, de 500 a 10\,000 rpm em passos
+de 500 rpm, e
+$\theta\in\{-120^\circ,-96^\circ,-72^\circ,-48^\circ,-24^\circ,0^\circ\}$.
+Essa etapa caracteriza o conflito entre as respostas e define escalas fixas
+antes da otimização.
+
+As duas decisões da otimização são contínuas:
+\begin{equation}
+\mathbf{x}=[N,\theta],\qquad
+500\leq N\leq10\,000,\qquad
+-120^\circ\leq\theta\leq0^\circ.
+\label{eq:variaveis-decisao}
+\end{equation}
+Esses limites reproduzem o domínio exploratório do estudo de caso, não uma
+faixa de calibração de um motor comercial, e asseguram
+$\theta+\delta\leq180^\circ$. O problema é
+\begin{equation}
+\underset{\mathbf{x}}{\operatorname{maximizar}}\;
+\mathbf{F}(\mathbf{x})=
+\left[\eta_t(\mathbf{x}),\,\dot w_{\mathrm{liq}}(\mathbf{x})\right].
+\label{eq:objetivos-fisicos}
+\end{equation}
+As decisões são transformadas para $[0,1]^2$. Para manter magnitudes
+comparáveis, os algoritmos recebem as funções de minimização
+\begin{equation}
+f_1(\mathbf{x})=-\frac{100\eta_t(\mathbf{x})}{40},
+\qquad
+f_2(\mathbf{x})=-\frac{\dot w_{\mathrm{liq}}(\mathbf{x})}{27\,000}.
+\label{eq:objetivos-computacionais}
+\end{equation}
+As escalas 40\% e 27\,000 kW/kg são limites arredondados acima dos máximos da
+varredura. Essa transformação monotônica não altera a dominância de Pareto.
+Os parâmetros constantes são apresentados na Tabela~\ref{tab:parametros-constantes}.
+
+\begin{table}[htbp]
+\centering
+\caption{Parâmetros físicos e numéricos mantidos constantes no caso de estudo.}
+\label{tab:parametros-constantes}
+\small
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Parâmetro} & \textbf{Símbolo} & \textbf{Valor} \\
+\midrule
+Número de cilindros & $z$ & 1 \\
+Volume deslocado por cilindro & $V_{du}$ & 250 cm$^3$ \\
+Razão biela--manivela & $L/R$ & 5,0 \\
+Taxa de compressão & $r$ & 12 \\
+Duração temporal da adição de calor & $\Delta t_c$ & 2,5 ms \\
+Estado inicial & $(P_{\mathrm{in}},T_{\mathrm{in}})$ & (100 kPa, 300 K) \\
+Calor específico fornecido & $q_{\mathrm{in}}$ & 1\,000 kJ/kg \\
+Fluido de trabalho & -- & CO$_2$ \\
+Malha fora/durante a adição & -- & 90 intervalos / 0,5$^\circ$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{NSGA-III e procedimento de benchmark}
+\label{subsec:algoritmos}
+
+O NSGA-III foi implementado no DEAP 1.4.4 \citep{fortin2012deap}, com 24 pontos
+de referência uniformes ($p=23$) e seleção ambiental baseada nesses pontos
+\citep{deb2014nsga3}. O SBX usa $p_c=0{,}9$ e $\eta_c=20$; a mutação polinomial
+é chamada em cada descendente, com $\eta_m=20$ e $p_m=0{,}5$ por variável.
+Empregaram-se 24 indivíduos iniciais e 20 gerações, totalizando
+$24(20+1)=504$ avaliações. Essa configuração-base corresponde a C12 na análise
+de sensibilidade.
+
+Para contextualizar seu desempenho, NSGA-II, MOPSO e MOEA/D foram empregados
+como benchmarks sob o mesmo domínio, funções objetivo e orçamento. A
+configuração-base do NSGA-III e cada benchmark foram executados 21 vezes,
+perfazendo 84 execuções e 42\,336 chamadas diretas do modelo, sem metamodelo ou
+interpolação. As sementes foram determinísticas, distintas entre algoritmos e
+repetições; portanto, o benchmark é independente, não pareado. A ordem dos
+métodos foi alternada entre repetições para reduzir viés temporal.
+
+Como benchmark evolutivo mais próximo, o NSGA-II foi implementado no DEAP com
+a mesma população e os mesmos operadores do NSGA-III. Sua seleção emprega
+torneio DCD, ordenação por dominância e distância de aglomeração
+\citep{deb2002}. Como benchmark baseado em enxame, o MOPSO é uma extensão
+própria da equação do PSO que adota os valores padrão consultados no PySwarm
+1.0.0, $\omega=c_1=c_2=0{,}5$. Foram acrescentados dominância, arquivo externo
+de até 96 soluções e seleção de líderes favorecendo regiões menos densas
+\citep{coello2004mopso}. Uma perturbação normal em uma decisão, com desvio 0,10,
+tem probabilidade inicial 0,10 e decresce linearmente até zero.
+
+Como benchmark por decomposição, o MOEA/D foi executado no pymoo 0.6.2
+\citep{blank2020}, com 24 direções, decomposição de Tchebycheff, 10 vizinhos e
+probabilidade 0,9 de acasalamento na vizinhança \citep{zhang2007moead}. O SBX
+usa $p_c=0{,}9$ e $\eta_c=20$. Na mutação polinomial do pymoo,
+\texttt{prob=0.5} controla a aplicação por indivíduo, $\eta_m=20$, e a
+probabilidade interna por variável permanece no padrão
+$1/n_{\mathrm{var}}=0{,}5$. Essa semântica difere da chamada incondicional no
+DEAP e é registrada conforme o experimento executado.
+
+\subsection{Métricas e solução de compromisso}
+\label{subsec:metricas}
+
+No benchmark, o indicador principal é o hipervolume (HV) da frente final no espaço
+escalonado de minimização, com referência $\mathbf{r}=(0,0)$; valores maiores
+indicam melhor convergência e cobertura. Também foram registrados tamanho da
+frente não dominada e tempo de execução. O tamanho da frente é somente
+descritivo, pois o arquivo do MOPSO admite 96 soluções, enquanto os demais
+métodos retornam no máximo 24. O benchmark contextualiza C12 por média,
+desvio-padrão e melhor valor observado nas 21 repetições; como não se empregou
+teste inferencial entre algoritmos, não se estabelece superioridade estatística.
+
+Para comparar a região física alcançada pelos métodos, cada frente foi
+representada por um compromisso de pesos iguais. Calcularam-se
+os pontos ideal $\mathbf{z}^\ast$ e nadir $\mathbf{z}^{\mathrm{nad}}$ da união
+não dominada das 84 execuções. Selecionou-se a menor distância
+\begin{equation}
+d(\mathbf{x})=
+\sqrt{\frac{1}{2}\sum_{m=1}^{2}
+\left[
+\frac{z_m^\ast-z_m(\mathbf{x})}
+{z_m^\ast-z_m^{\mathrm{nad}}}
+\right]^2}.
+\label{eq:compromisso}
+\end{equation}
+
+\subsection{Calibração e análise de sensibilidade do NSGA-III}
+\label{subsec:sensibilidade-nsga3}
+
+Em experimento separado do benchmark, manteve-se a estrutura do NSGA-III e
+variaram-se somente seus hiperparâmetros. Para separar sensibilidade de esforço
+computacional, cada configuração recebeu 504 avaliações. O fator
+população/gerações assumiu os pares
+$(12,41)$, $(24,20)$, $(36,13)$ e $(56,8)$, todos satisfazendo
+$N_{\mathrm{pop}}(N_{\mathrm{ger}}+1)=504$. Os demais níveis foram
+$p_c\in\{0{,}7;0{,}9;1{,}0\}$, $\eta_c\in\{10;20;30\}$,
+$\eta_m\in\{10;20;40\}$ e $p_m\in\{0{,}25;0{,}50;1{,}00\}$. O espaço completo
+tem 324 combinações; selecionaram-se 36 configurações únicas por hipercubo
+latino discretizado \citep{mckay1979lhs}, balanceado de modo que cada nível dos
+fatores de três níveis ocorresse 12 vezes e cada par população/gerações, nove
+vezes. As combinações amostradas foram identificadas sequencialmente de C01 a
+C36; esses códigos são apenas rótulos das combinações de hiperparâmetros, e não
+variantes distintas do NSGA-III. A configuração-base C12 empregada no benchmark
+foi incluída como referência.
+
+A triagem avaliou as 36 configurações com sete sementes comuns. Em seguida, a
+referência, as três maiores médias de HV e a menor média receberam 14 sementes
+adicionais, reservadas da seleção. As cinco finalistas totalizaram, portanto,
+21 repetições. O desenho completo compreende 322 execuções e 162\,288
+avaliações. Eventual falha de convergência da iteração politrópica recebe
+desempenho físico nulo nos dois objetivos, ponto dominado por qualquer solução
+válida, sem alterar o orçamento.
+
+Além do HV, calcularam-se IGD+, espaçamento, tamanho da frente e convergência
+por geração. A referência do IGD+ é a união não dominada de todas as frentes.
+Os efeitos principais foram estimados por modelo linear categórico bloqueado
+por semente e descritos por $F$, valor-$p$ e $\eta_p^2$. Interações de dois
+fatores foram adicionadas separadamente ao modelo aditivo e tratadas como
+exploratórias. Nas 14 sementes reservadas, cada finalista foi comparada à
+referência pelo teste bilateral de Wilcoxon pareado \citep{wilcoxon1945}, com
+correção de Holm \citep{holm1979}, correlação bisserial de postos e intervalo
+bootstrap percentil de 95\% com 10\,000 reamostragens. A recomendação é a maior
+média de HV na confirmação, usando o menor desvio-padrão como desempate.
+
+Os experimentos foram realizados em Python 3.13.5 com até oito processos. O
+paralelismo afeta apenas o tempo, pois sementes e resultados independem da
+ordem de conclusão.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Resultados}\label{sec:resultados}
+
+\subsection{Verificação e análise paramétrica}
+
+As seis eficiências calculadas coincidiram com as publicadas após arredondamento
+aos três algarismos significativos do artigo-base, isto é, à resolução de
+0,1 ponto percentual (Tabela~\ref{tab:verificacao-eficiencia}). A diferença nessa
+precisão foi 0,0 ponto percentual em todos os casos. Como as saídas originais não
+arredondadas não estão disponíveis e as correlações termofísicas diferem, casas
+adicionais não são interpretadas como erro. Eficiência e pressão máxima
+diminuíram monotonicamente com $\delta$; trata-se de reprodução numérica, não de
+validação experimental.
+
+\begin{table}[htbp]
+\centering
+\caption{Reprodução das eficiências na resolução publicada de 0,1 ponto percentual.}
+\label{tab:verificacao-eficiencia}
+\small
+\begin{tabular}{@{}rrrrrrr@{}}
+\toprule
+$\delta$ [$^\circ$] & 10 & 30 & 50 & 70 & 90 & 110 \\
+\midrule
+Publicada [\%] & 38,4 & 37,0 & 34,1 & 30,6 & 27,0 & 23,7 \\
+Calculada (arred.) [\%] & 38,4 & 37,0 & 34,1 & 30,6 & 27,0 & 23,7 \\
+Diferença após arred. [p.p.] & 0,0 & 0,0 & 0,0 & 0,0 & 0,0 & 0,0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+No caso de referência, obtiveram-se $\eta_t=33{,}257\%$,
+$w_{\mathrm{liq}}=332{,}567$ kJ/kg,
+$\dot w_{\mathrm{liq}}=13\,302{,}7$ kW/kg,
+$P_{\max}=3\,026{,}2$ kPa e $T_{\max}=1\,281{,}3$ K. Na varredura, a maior
+eficiência foi 38,280\% em 500 rpm e $\theta=0^\circ$, enquanto a maior potência
+foi 25\,672,8 kW/kg em 10\,000 rpm e $\theta=-72^\circ$. Portanto, os dois
+máximos não coincidem, justificando a formulação multiobjetivo.
+
+O instante associado à maior eficiência avançou de $0^\circ$, em 500 rpm, para
+$-24^\circ$, em 2\,500 rpm, $-48^\circ$, em 5\,500 rpm, e $-72^\circ$, em
+8\,000 rpm. Esse deslocamento compensa o crescimento de $\delta$ com a rotação,
+mantendo maior parcela da liberação de calor próxima ao ponto morto superior.
+A Figura~\ref{fig:varredura-objetivos} mostra esse comportamento e o crescimento
+da potência com a frequência dos ciclos.
+
+\begin{figure}[htbp]
+\centering
+\begin{minipage}[t]{0.49\linewidth}
+\centering
+\includegraphics[width=\linewidth]{thermal_efficiency_vs_engine_speed.png}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.49\linewidth}
+\centering
+\includegraphics[width=\linewidth]{net_specific_power_vs_engine_speed.png}
+\end{minipage}
+\caption{Eficiência térmica e potência líquida específica na varredura de
+rotação e instante de ignição. Traços e marcadores preservam a leitura em
+escala de cinza.}
+\label{fig:varredura-objetivos}
+\end{figure}
+
+\subsection{Desempenho do NSGA-III frente aos benchmarks}
+
+Antes da calibração, avaliou-se a configuração-base C12 do NSGA-III frente aos
+três benchmarks. As 84 execuções concluíram as 42\,336 avaliações sem falha de
+convergência. O NSGA-III alcançou HV médio de $0{,}84293\pm0{,}00269$; o
+NSGA-II obteve média 0,20\% maior, com dispersão semelhante. O MOPSO produziu o
+maior HV isolado e o menor tempo médio, mas três execuções de menor qualidade
+elevaram seu desvio-padrão. O MOEA/D teve HV médio 2,13\% abaixo do NSGA-II e
+consumiu 3,56 vezes mais tempo. Assim, C12 apresentou desempenho próximo, mas
+não liderou as métricas observadas, o que motivou sua calibração. Sem teste
+inferencial entre métodos, o benchmark é descritivo e não estabelece
+superioridade estatística.
+
+\begin{table}[htbp]
+\centering
+\caption{Desempenho da configuração-base do NSGA-III e dos benchmarks em 21 execuções.}
+\label{tab:comparacao-algoritmos}
+\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+\textbf{Método} & \textbf{HV médio $\pm$ DP} & \textbf{Melhor HV} &
+\textbf{Frente média} & \textbf{Tempo [s]} \\
+\midrule
+NSGA-III (C12) & $0{,}84293\pm0{,}00269$ & 0,84616 & 23,67 & $9{,}86\pm1{,}01$ \\
+NSGA-II  & $\mathbf{0{,}84463\pm0{,}00292}$ & 0,84755 & 23,05 & $9{,}64\pm1{,}11$ \\
+MOPSO    & $0{,}83867\pm0{,}01387$ & \textbf{0,85007} & 95,05 & $\mathbf{9{,}27\pm0{,}80}$ \\
+MOEA/D   & $0{,}82660\pm0{,}01048$ & 0,84052 & 20,81 & $34{,}31\pm1{,}85$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+O tamanho da frente do MOPSO decorre também de seu arquivo externo de até 96
+soluções e não é diretamente comparável à população final dos demais métodos.
+A Figura~\ref{fig:pareto-algoritmos} exibe a melhor execução de C12 e de cada
+benchmark; a tabela das 21 repetições, e não apenas essa figura, fundamenta a
+comparação de robustez. Todas as aproximações recuperaram o conflito esperado:
+a eficiência máxima da união foi 38,435\% em 500 rpm e $-3{,}582^\circ$, com
+1\,601,4 kW/kg, ao passo que a potência máxima foi 25\,675,9 kW/kg em
+9\,999,9 rpm e $-70{,}873^\circ$, com eficiência de 30,811\%.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.88\linewidth]{multiobjective_pareto_front.png}
+\caption{Frente do NSGA-III e frentes dos benchmarks nas execuções de maior
+hipervolume. Traços e marcadores permitem impressão em preto e branco.}
+\label{fig:pareto-algoritmos}
+\end{figure}
+
+O compromisso do NSGA-III apresentou escore 0,398393. Os benchmarks localizaram
+soluções na mesma região física: 5\,169--5\,445 rpm, $\theta$ entre
+$-36{,}86^\circ$ e $-38{,}69^\circ$, $\eta_t$ entre 35,337\% e 35,632\% e
+potência entre 15\,344,8 e 16\,018,4 kW/kg. Seus escores foram 0,398572
+(NSGA-II), 0,398370 (MOPSO) e 0,398735 (MOEA/D), diferenças pequenas e sem
+dominância entre os compromissos. O MOPSO apresentou a menor dispersão nesse
+ponto; o MOEA/D deslocou o compromisso para maior potência, com perda de
+eficiência e maior variabilidade.
+
+\subsection{Calibração do NSGA-III}
+
+Para calibrar o NSGA-III sem alterar o orçamento de 504 avaliações, realizou-se
+a triagem de seus hiperparâmetros. C09, C34 e C22 ocuparam as três primeiras
+posições; C23 foi a última e C12 corresponde à configuração-base usada no
+benchmark. Cada identificador denota a combinação de hiperparâmetros
+explicitada na Tabela~\ref{tab:confirmacao-nsga3}, que também mostra a confirmação
+independente. C09 obteve a maior média de HV nas 14 sementes reservadas e foi,
+portanto, recomendada dentro do desenho avaliado.
+
+\begin{table}[htbp]
+\centering
+\caption{Identificadores e combinações de hiperparâmetros do NSGA-III na confirmação.}
+\label{tab:confirmacao-nsga3}
+\scriptsize
+\setlength{\tabcolsep}{3.2pt}
+\begin{tabular}{@{}lrrrrrrr@{}}
+\toprule
+\textbf{Conf.} & \textbf{Pop./ger.} & $\boldsymbol{p_c}$ &
+$\boldsymbol{\eta_c}$ & $\boldsymbol{\eta_m}$ & $\boldsymbol{p_m}$ &
+\textbf{HV confirmação} & \textbf{IGD+ (21)} \\
+\midrule
+C09 & 56/8  & 1,0 & 30 & 10 & 1,00 & $\mathbf{0{,}847732\pm0{,}001350}$ & \textbf{0,002908} \\
+C34 & 56/8  & 0,9 & 30 & 10 & 1,00 & $0{,}847253\pm0{,}001396$ & 0,003009 \\
+C22 & 56/8  & 0,7 & 10 & 40 & 1,00 & $0{,}846301\pm0{,}002668$ & 0,003087 \\
+C12 & 24/20 & 0,9 & 20 & 20 & 0,50 & $0{,}840829\pm0{,}006391$ & 0,005579 \\
+C23 & 36/13 & 1,0 & 30 & 40 & 0,25 & $0{,}837136\pm0{,}012886$ & 0,007285 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Contra C12, C09 aumentou o HV médio em 0,006903, ou 0,82\%, com IC bootstrap de
+95\% $[0{,}003751;0{,}010479]$, $p_{\mathrm{Holm}}=0{,}000977$ e correlação
+bisserial de postos 0,981. C34 e C22 também superaram a referência nas sementes
+reservadas ($p_{\mathrm{Holm}}=0{,}001099$ e 0,026855, respectivamente); C23
+não diferiu de C12 ($p_{\mathrm{Holm}}=0{,}501587$). Nas 21 execuções, C09
+reduziu o IGD+ em 47,9\% e o espaçamento em 54,2\%. Sua frente teve 56 pontos,
+contra média de 23,24 em C12, ressalvando-se que essa diferença também reflete
+a população maior.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.90\linewidth]{nsga3_sensitivity_confirmation_boxplot.png}
+\caption{Distribuição do HV nas 21 execuções das cinco configurações; testes
+inferenciais: 14 sementes reservadas.}
+\label{fig:confirmacao-nsga3}
+\end{figure}
+
+A probabilidade de mutação por variável foi o fator mais influente
+($F=18{,}979$, $p=2{,}30\times10^{-8}$, $\eta_p^2=0{,}1396$), seguida pelo par
+população/gerações ($F=10{,}366$, $p=1{,}97\times10^{-6}$,
+$\eta_p^2=0{,}1173$) e por $\eta_m$ ($F=10{,}902$,
+$p=2{,}97\times10^{-5}$, $\eta_p^2=0{,}0852$). $p_c$ e $\eta_c$ não
+apresentaram efeito principal significativo. As médias marginais favoreceram
+$p_m=1{,}0$, o par 56/8 e $\eta_m=10$. Entretanto, $p_c=0{,}7$ teve a maior
+média marginal apesar de C09 usar $p_c=1{,}0$, evidenciando que efeitos
+isolados não determinam a melhor combinação. As interações
+população$\times p_m$ e $\eta_m\times p_m$ tiveram valor-$p$ nominal inferior a
+0,05, mas são exploratórias e não foram corrigidas por multiplicidade.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.90\linewidth]{nsga3_sensitivity_main_effects.png}
+\caption{Efeitos principais dos hiperparâmetros do NSGA-III; barras:
+erro-padrão da triagem.}
+\label{fig:efeitos-nsga3}
+\end{figure}
+
+O ajuste alterou sobretudo regularidade e cobertura, não a região física do
+compromisso. C09 produziu $N=5\,195{,}9\pm144{,}6$ rpm,
+$\theta=-37{,}19\pm1{,}42^\circ$, $\eta_t=35{,}611\pm0{,}135\%$ e
+$\dot w_{\mathrm{liq}}=15\,417{,}8\pm370{,}6$ kW/kg; C12 produziu
+$5\,232{,}6\pm208{,}2$ rpm, $-37{,}93\pm2{,}94^\circ$,
+$35{,}566\pm0{,}231\%$ e $15\,504{,}6\pm516{,}9$ kW/kg. A recomendação de C09
+é específica para dois objetivos, o domínio estudado e o orçamento de 504
+avaliações; ela é a melhor configuração observada entre as 36 amostradas, não
+um ótimo global de hiperparâmetros.
+
+A confirmação compara C09 exclusivamente à referência interna C12. Como os
+benchmarks não foram reexecutados com as mesmas sementes reservadas, essa etapa
+não demonstra superioridade inferencial de C09 sobre NSGA-II, MOPSO ou MOEA/D.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Conclusões}\label{sec:conclusoes}
+
+Este trabalho aplicou e calibrou o NSGA-III na maximização da eficiência térmica
+e da potência líquida específica do modelo Otto com adição finita de calor,
+empregando NSGA-II, MOPSO e MOEA/D como benchmarks. A implementação reproduziu
+as eficiências publicadas e a varredura confirmou o conflito entre os objetivos.
+Na configuração-base, o NSGA-III localizou a mesma região de compromisso dos
+comparadores e obteve HV médio 0,20\% inferior ao NSGA-II; o MOPSO registrou o
+maior HV isolado e o menor tempo. Sem teste inferencial entre métodos, esses
+contrastes permanecem descritivos.
+
+A proposta não é uma variante estrutural do NSGA-III, mas sua aplicação com
+calibração sistemática e confirmação independente. Frente à referência C12,
+C09 elevou o HV em 0,82\% nas sementes reservadas
+($p_{\mathrm{Holm}}=0{,}000977$) e reduziu o IGD+ em 47,9\% e o espaçamento em
+54,2\%. O ganho ocorreu sobretudo na regularidade e na cobertura da frente.
+Esses resultados sustentam a recomendação do NSGA-III calibrado para o modelo,
+mas não demonstram superioridade de C09 sobre os benchmarks.
+
+As contribuições incluem a aplicação verificável do NSGA-III ao modelo FTHA, a
+caracterização da fronteira eficiência--potência e a identificação dos
+hiperparâmetros mais influentes por triagem e confirmação; o benchmark sob
+orçamento comum fornece o contexto comparativo. As conclusões se restringem ao
+modelo idealizado, sem validação experimental, a duas decisões, dois objetivos e
+um único domínio e orçamento. As frentes têm cardinalidades distintas, somente
+36 das 324 combinações foram amostradas e C09 não constitui um ótimo global.
+
+Como próximo passo, C09 deve ser comparada diretamente aos benchmarks com
+sementes comuns, cardinalidades compatibilizadas e testes inferenciais. Também
+se recomenda incorporar perdas térmicas e mecânicas e dados experimentais;
+ampliar as decisões com taxa de compressão, duração da combustão e geometria; e
+incluir torque, pressão, temperatura e emissões como objetivos ou restrições.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+~\\
+\bibliographystyle{sbpo}
+\bibliography{exemplo-latex}
+
+
+\end{document}

@@ -24,7 +24,9 @@ from .FTHA import CycleResult, simulate_cycle
 
 
 ARTICLE_HEAT_ADDITION_ANGLES_DEGREES = (10.0, 30.0, 50.0, 70.0, 90.0, 110.0)
+# The reference article reports these percentages to one decimal place.
 ARTICLE_PUBLISHED_EFFICIENCIES_PERCENT = (38.4, 37.0, 34.1, 30.6, 27.0, 23.7)
+ARTICLE_PUBLISHED_EFFICIENCY_DECIMAL_PLACES = 1
 
 LOG_PRESSURE_VOLUME_FIGURE = (
     IMAGES_DIRECTORY / "article_variable_delta_log_pressure_vs_log_volume.png"
@@ -106,9 +108,10 @@ def _series_label(
     result: CycleResult,
 ) -> str:
     efficiency_percent = 100.0 * result.metrics.thermal_efficiency
+    precision = ARTICLE_PUBLISHED_EFFICIENCY_DECIMAL_PLACES
     return (
         rf"$\delta={heat_addition_angle_degrees:.0f}^\circ$, "
-        rf"$\eta_t={efficiency_percent:.1f}\%$"
+        rf"$\eta_t={efficiency_percent:.{precision}f}\%$"
     )
 
 
@@ -249,9 +252,10 @@ def generate_article_validation_diagrams() -> dict[float, CycleResult]:
 if __name__ == "__main__":
     generated_results = generate_article_validation_diagrams()
     print(f"Saved article validation diagrams to {IMAGES_DIRECTORY}")
+    precision = ARTICLE_PUBLISHED_EFFICIENCY_DECIMAL_PLACES
     for heat_addition_angle_degrees, result in generated_results.items():
         efficiency_percent = 100.0 * result.metrics.thermal_efficiency
         print(
             f"delta={heat_addition_angle_degrees:.0f} degrees: "
-            f"eta_t={efficiency_percent:.3f}%"
+            f"eta_t={efficiency_percent:.{precision}f}%"
         )

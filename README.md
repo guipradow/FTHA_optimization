@@ -115,10 +115,10 @@ e o expoente $n_i$ é corrigido iterativamente até que trabalho, energia
 interna, temperatura, pressão e equação de estado sejam consistentes. Intervalos
 com $v_i\simeq v_{i+1}$ são tratados como isocóricos.
 
-## Validação com os testes paramétricos do artigo
+## Verificação numérica com os testes paramétricos do artigo
 
-A validação reproduz a série publicada para $r=12$ e $\theta=-5^\circ$, variando
-somente a duração angular da adição de calor:
+A reprodução numérica considera a série publicada para $r=12$ e
+$\theta=-5^\circ$, variando somente a duração angular da adição de calor:
 
 $$
 \delta\in\{10^\circ,30^\circ,50^\circ,70^\circ,90^\circ,110^\circ\}.
@@ -140,18 +140,26 @@ Os demais parâmetros permanecem fixos:
 
 [`src/article_validation.py`](src/article_validation.py) executa os seis testes
 com o polinômio de terceiro grau disponível em
-[`data/data.csv`](data/data.csv). As eficiências reproduzem todos os valores
-publicados na precisão de uma casa decimal:
+[`data/data.csv`](data/data.csv). O artigo-base informa uma correlação de quinta
+ordem para o CO₂ nesses testes; portanto, esta etapa verifica a concordância das
+respostas, não a identidade das correlações termofísicas. O artigo apresenta as
+eficiências com três algarismos significativos, correspondentes a uma casa
+decimal nessa faixa. Arredondados à mesma precisão, os valores calculados
+reproduzem todos os valores publicados:
 
 | $\delta$ | 10° | 30° | 50° | 70° | 90° | 110° |
 |---:|---:|---:|---:|---:|---:|---:|
 | $\eta_t$ publicada | 38,4% | 37,0% | 34,1% | 30,6% | 27,0% | 23,7% |
-| $\eta_t$ calculada | 38,409% | 37,031% | 34,077% | 30,572% | 27,046% | 23,730% |
+| $\eta_t$ calculada, arredondada | 38,4% | 37,0% | 34,1% | 30,6% | 27,0% | 23,7% |
+| Diferença na precisão publicada | 0,0 p.p. | 0,0 p.p. | 0,0 p.p. | 0,0 p.p. | 0,0 p.p. | 0,0 p.p. |
 
-[`tests/test_article_validation.py`](tests/test_article_validation.py) exige
-diferença máxima de 0,05 ponto percentual entre os valores calculados e
-publicados. O teste também verifica a redução monotônica da eficiência e da
-pressão máxima com o aumento de $\delta$, além das dimensões das seis malhas.
+Na precisão publicada, a diferença observável é 0,0 ponto percentual nos seis
+casos. Como as saídas originais não arredondadas não estão disponíveis,
+comparações com casas adicionais não são reportadas nem interpretadas como erro.
+O teste de regressão arredonda os resultados calculados a uma casa decimal e
+exige igualdade exata com a tabela do artigo. Também verifica a redução
+monotônica da eficiência e da pressão máxima com o aumento de $\delta$, além das
+dimensões das seis malhas.
 
 ### Diagrama $\log(P)\times\log(v)$
 
@@ -188,10 +196,10 @@ para expansão, elevando a temperatura de descarga e reduzindo a eficiência.
 ## Análise de sensibilidade
 
 [`src/sensitivity_analysis.py`](src/sensitivity_analysis.py) mantém os
-parâmetros físicos e termodinâmicos da validação do artigo. Na varredura, apenas
-a rotação $N$ e o instante de ignição $\theta$ variam. A duração temporal de
-2,5 ms é a definição do estudo necessária para converter cada rotação na
-duração angular $\delta=2\pi N\Delta t_c/60$.
+parâmetros geométricos, operacionais e o modelo termofísico local empregados na
+reprodução. Na varredura, apenas a rotação $N$ e o instante de ignição $\theta$
+variam. A duração temporal de 2,5 ms é a definição do estudo necessária para
+converter cada rotação na duração angular $\delta=2\pi N\Delta t_c/60$.
 
 ### Ponto de referência do estudo
 
@@ -283,10 +291,10 @@ $$
 $$
 
 Todos os demais parâmetros permanecem iguais aos da tabela do ponto de
-referência e, portanto, aos parâmetros físicos e termodinâmicos usados na
-validação do artigo. A malha conserva 90 intervalos antes e depois da adição de
-calor e passo de 0,5° durante esse processo; por isso, seu número de estados
-varia de 196 a 481 conforme $N$.
+referência e, portanto, aos valores da implementação local usados na reprodução.
+A malha conserva 90 intervalos antes e depois da adição de calor e passo de 0,5°
+durante esse processo; por isso, seu número de estados varia de 196 a 481
+conforme $N$.
 
 Como $\Delta t_c$ é constante, a duração angular da adição de calor cresce de
 7,5° a 150° ao longo da faixa de rotação. Essa relação explica por que o
@@ -340,8 +348,8 @@ termodinâmicos, mas não garante simultaneamente a melhor eficiência ou a maio
 potência.
 
 As figuras desta seção adotam uma identidade visual própria, diferente da
-validação do artigo. Todas as séries são pretas e cada instante de ignição tem
-simultaneamente um padrão de traço e um marcador exclusivos. Assim, a leitura
+verificação numérica do artigo-base. Todas as séries são pretas e cada instante
+de ignição tem simultaneamente um padrão de traço e um marcador exclusivos. Assim, a leitura
 permanece possível em tela, fotocópia ou impressão em preto e branco.
 
 #### Eficiência térmica
@@ -414,9 +422,9 @@ mais amplo porque o FTHA impõe uma duração temporal de combustão constante.
 Com $\Delta t_c=2{,}5$ ms, a duração angular é
 $\delta=6N\Delta t_c$, variando de 7,5° a 150°. Os limites escolhidos mantêm
 $\theta+\delta\leq180^\circ$ em todo o domínio. Volume deslocado, número de
-cilindros, $L/R$, taxa de compressão, estado inicial, $q_{in}$, CO₂, tolerâncias
-e malha são exatamente os parâmetros do artigo já listados no ponto de
-referência. Cada avaliação chama diretamente o modelo termodinâmico com 90
+cilindros, $L/R$, taxa de compressão, estado inicial, $q_{in}$, CO₂ e malha seguem
+os valores usados na reprodução; a correlação termofísica cúbica e as tolerâncias
+são as da implementação local. Cada avaliação chama diretamente o modelo com 90
 intervalos antes e depois da adição de calor e passo de 0,5° durante a
 combustão; não foi usado metamodelo ou interpolação.
 
@@ -758,11 +766,11 @@ print(dict(zip(OBJECTIVE_NAMES, objectives)))
 - `src/gas_prop.py`: propriedades do gás ideal com calores específicos
   variáveis;
 - `src/article_validation.py`: reprodução dos seis testes paramétricos e geração
-  dos quatro diagramas de validação;
-- `src/base_case_analysis.py`: caso-base específico da validação do artigo, com
+  dos quatro diagramas de verificação;
+- `src/base_case_analysis.py`: caso paramétrico de referência da reprodução, com
   $\theta=-5^\circ$ e $\delta=10^\circ$;
 - `src/sensitivity_analysis.py`: ponto de referência e varredura de rotação e
-  instante de ignição com os demais parâmetros do artigo, exportação dos
+  instante de ignição com os parâmetros da implementação local, exportação dos
   resultados e dez gráficos para impressão em preto e branco;
 - `src/multiobjective_optimization.py`: comparação reproduzível entre NSGA-II,
   NSGA-III, MOPSO e MOEA/D para maximizar eficiência e potência em 21 sementes;
@@ -773,8 +781,8 @@ print(dict(zip(OBJECTIVE_NAMES, objectives)))
 - `reports/`: histórico e resumo do ponto de referência, resultados tabulares
   da varredura, frentes de Pareto, estatísticas por execução e resumo da
   otimização;
-- `tests/test_article_validation.py`: regressão numérica dos seis casos
-  publicados;
+- `tests/test_article_validation.py`: verificação numérica dos seis casos
+  publicados na precisão de uma casa decimal;
 - `tests/test_ftha.py`: regressão e validação da interface do modelo.
 - `tests/test_multiobjective_optimization.py`: dominância, crowding, limites e
   agregação estatística do estudo multiobjetivo.
