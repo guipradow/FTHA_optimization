@@ -1,6 +1,6 @@
-metric,unit,minimum_value,minimum_engine_speed_rpm,minimum_ignition_timing_degrees,maximum_value,maximum_engine_speed_rpm,maximum_ignition_timing_degrees
-thermal_efficiency_percent,%,4.717968995,500,-120,38.27959125,500,0
-net_specific_power_kw_per_kg,kW/kg,196.5820415,500,-120,25672.75157,10000,-72
-work_consumption_ratio,-,0.3401575836,500,0,0.937634945,500,-120
-maximum_pressure_kpa,kPa,2225.539089,4500,0,7831.668404,500,-120
-maximum_temperature_k,K,1171.41482,10000,-24,1960.992189,500,-120
+metric,unit,minimum_value,minimum_engine_speed_rpm,minimum_ignition_timing_degrees,maximum_value,maximum_engine_speed_rpm,maximum_ignition_timing_degrees,minimum_compression_ratio,maximum_compression_ratio,minimum_connecting_rod_to_crank_ratio,maximum_connecting_rod_to_crank_ratio
+thermal_efficiency_percent,%,4.717968995,500,-120,38.27959125,500,0,12,12,5,5
+net_specific_power_kw_per_kg,kW/kg,196.5820415,500,-120,25672.75157,10000,-72,12,12,5,5
+work_consumption_ratio,-,0.3401575836,500,0,0.937634945,500,-120,12,12,5,5
+maximum_pressure_kpa,kPa,2225.539089,4500,0,7831.668404,500,-120,12,12,5,5
+maximum_temperature_k,K,1171.41482,10000,-24,1960.992189,500,-120,12,12,5,5

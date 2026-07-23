@@ -2,10 +2,14 @@
 
 The script first simulates a reference point with the article parameters and
 saves its state history, metrics, and five thermodynamic diagrams. It then
-evaluates six ignition timings and twenty engine speeds, writes all 120
-operating points and a summary
-of their extrema, and saves the five sensitivity charts. Every chart uses a
-black-and-white-safe visual identity distinct from the article validation.
+evaluates six ignition timings and twenty engine speeds at the reference
+geometry, writes all 120 operating points and a summary of their extrema, and
+saves the five sensitivity charts. A second, four-dimensional screening also
+crosses five compression ratios and five connecting-rod ratios with those
+operating points (3,000 exact simulations); this verifies objective scales over
+the complete optimization domain without replacing the continuous optimizer.
+Every chart uses a black-and-white-safe visual identity distinct from the
+article validation.
 """
 
 from __future__ import annotations
@@ -39,6 +43,10 @@ REPORTS_DIRECTORY = PROJECT_ROOT / "reports"
 IMAGES_DIRECTORY = PROJECT_ROOT / "img"
 RESULTS_PATH = REPORTS_DIRECTORY / "sensitivity_analysis.csv"
 SUMMARY_PATH = REPORTS_DIRECTORY / "sensitivity_analysis_summary.csv"
+DESIGN_SPACE_RESULTS_PATH = REPORTS_DIRECTORY / "design_space_screening.csv"
+DESIGN_SPACE_SUMMARY_PATH = (
+    REPORTS_DIRECTORY / "design_space_screening_summary.csv"
+)
 BASE_CASE_STATES_PATH = REPORTS_DIRECTORY / "case_study_base_case_states.csv"
 BASE_CASE_SUMMARY_PATH = REPORTS_DIRECTORY / "case_study_base_case_summary.csv"
 
@@ -61,6 +69,10 @@ BASE_CASE_POLYTROPIC_EXPONENT_FIGURE = (
 
 ENGINE_SPEEDS_RPM = np.linspace(500.0, 10_000.0, 20)
 IGNITION_TIMINGS_DEGREES = np.linspace(-120.0, 0.0, 6)
+# Five evenly spaced levels include the literature-supported bounds and the
+# central values without pretending that a coarse grid replaces optimization.
+COMPRESSION_RATIOS = np.linspace(8.0, 12.0, 5)
+CONNECTING_ROD_TO_CRANK_RATIOS = np.linspace(3.2, 4.4, 5)
 
 # All physical and thermodynamic values come from the article. The combustion
 # time is retained from the case-study definition because engine speed converts
@@ -203,6 +215,10 @@ def base_case_summary(result: CycleResult) -> pd.DataFrame:
                 "ignition_timing_degrees": (
                     BASE_CASE_IGNITION_TIMING_DEGREES
                 ),
+                "compression_ratio": CASE_STUDY_PARAMETERS.compression_ratio,
+                "connecting_rod_to_crank_ratio": (
+                    CASE_STUDY_PARAMETERS.connecting_rod_to_crank_ratio
+                ),
                 "heat_addition_angle_degrees": heat_addition_angle_degrees,
                 "thermal_efficiency_percent": (
                     100.0 * metrics.thermal_efficiency
@@ -249,6 +265,10 @@ def calculate_sensitivity_results(
                 {
                     "engine_speed_rpm": engine_speed_rpm,
                     "ignition_timing_degrees": ignition_timing_degrees,
+                    "compression_ratio": parameters.compression_ratio,
+                    "connecting_rod_to_crank_ratio": (
+                        parameters.connecting_rod_to_crank_ratio
+                    ),
                     "heat_addition_angle_degrees": (
                         6.0
                         * engine_speed_rpm
@@ -268,14 +288,77 @@ def calculate_sensitivity_results(
     return pd.DataFrame.from_records(records)
 
 
+def calculate_design_space_screening_results(
+    parameters: ModelParameters = CASE_STUDY_PARAMETERS,
+) -> pd.DataFrame:
+    """Evaluate a coarse factorial screen over all four decision variables.
+
+    The five geometric levels are diagnostic only. The optimizers still treat
+    compression ratio and connecting-rod ratio as continuous decisions.
+    """
+    records: list[dict[str, float]] = []
+    for compression_ratio in COMPRESSION_RATIOS:
+        for connecting_rod_to_crank_ratio in CONNECTING_ROD_TO_CRANK_RATIOS:
+            geometry = replace(
+                parameters,
+                compression_ratio=float(compression_ratio),
+                connecting_rod_to_crank_ratio=float(
+                    connecting_rod_to_crank_ratio
+                ),
+            )
+            for ignition_timing_degrees in IGNITION_TIMINGS_DEGREES:
+                for engine_speed_rpm in ENGINE_SPEEDS_RPM:
+                    result = simulate_cycle(
+                        engine_speed_rpm=engine_speed_rpm,
+                        ignition_timing_degrees=ignition_timing_degrees,
+                        parameters=geometry,
+                        crank_angle_grid_rad=case_study_crank_angle_grid_rad(
+                            engine_speed_rpm,
+                            ignition_timing_degrees,
+                            geometry,
+                        ),
+                    )
+                    metrics = result.metrics
+                    records.append(
+                        {
+                            "engine_speed_rpm": engine_speed_rpm,
+                            "ignition_timing_degrees": ignition_timing_degrees,
+                            "compression_ratio": compression_ratio,
+                            "connecting_rod_to_crank_ratio": (
+                                connecting_rod_to_crank_ratio
+                            ),
+                            "heat_addition_angle_degrees": (
+                                6.0
+                                * engine_speed_rpm
+                                * geometry.heat_addition_duration_s
+                            ),
+                            "thermal_efficiency_percent": (
+                                100.0 * metrics.thermal_efficiency
+                            ),
+                            "net_specific_power_kw_per_kg": (
+                                metrics.net_specific_power_kw_per_kg
+                            ),
+                            "work_consumption_ratio": (
+                                metrics.work_consumption_ratio
+                            ),
+                            "maximum_pressure_kpa": (
+                                metrics.maximum_pressure_kpa
+                            ),
+                            "maximum_temperature_k": (
+                                metrics.maximum_temperature_k
+                            ),
+                        }
+                    )
+    return pd.DataFrame.from_records(records)
+
+
 def summarize_sensitivity_results(results: pd.DataFrame) -> pd.DataFrame:
     """Return the global minimum and maximum of every response indicator."""
     records: list[dict[str, float | str]] = []
     for value_column, unit in RESULT_METRICS:
         minimum_row = results.loc[results[value_column].idxmin()]
         maximum_row = results.loc[results[value_column].idxmax()]
-        records.append(
-            {
+        record: dict[str, float | str] = {
                 "metric": value_column,
                 "unit": unit,
                 "minimum_value": minimum_row[value_column],
@@ -289,7 +372,18 @@ def summarize_sensitivity_results(results: pd.DataFrame) -> pd.DataFrame:
                     "ignition_timing_degrees"
                 ],
             }
-        )
+        for decision_column in (
+            "compression_ratio",
+            "connecting_rod_to_crank_ratio",
+        ):
+            if decision_column in results.columns:
+                record[f"minimum_{decision_column}"] = minimum_row[
+                    decision_column
+                ]
+                record[f"maximum_{decision_column}"] = maximum_row[
+                    decision_column
+                ]
+        records.append(record)
     return pd.DataFrame.from_records(records)
 
 
@@ -641,6 +735,23 @@ def run_sensitivity_analysis() -> pd.DataFrame:
     return results
 
 
+def run_design_space_screening() -> pd.DataFrame:
+    """Run and persist the four-decision diagnostic factorial screen."""
+    results = calculate_design_space_screening_results()
+    REPORTS_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    results.to_csv(
+        DESIGN_SPACE_RESULTS_PATH,
+        index=False,
+        float_format="%.10g",
+    )
+    summarize_sensitivity_results(results).to_csv(
+        DESIGN_SPACE_SUMMARY_PATH,
+        index=False,
+        float_format="%.10g",
+    )
+    return results
+
+
 def run_case_study() -> tuple[CycleResult, pd.DataFrame]:
     """Run and persist the reference point and sensitivity analysis."""
     base_case_result = calculate_case_study_base_case()
@@ -651,8 +762,14 @@ def run_case_study() -> tuple[CycleResult, pd.DataFrame]:
 
 if __name__ == "__main__":
     generated_base_case, generated_results = run_case_study()
+    generated_design_space = run_design_space_screening()
     print(f"Saved reference-point states to {BASE_CASE_STATES_PATH}")
     print(f"Saved reference-point summary to {BASE_CASE_SUMMARY_PATH}")
     print(f"Saved {len(generated_results)} operating points to {RESULTS_PATH}")
     print(f"Saved extrema summary to {SUMMARY_PATH}")
+    print(
+        f"Saved {len(generated_design_space)} four-decision screening points "
+        f"to {DESIGN_SPACE_RESULTS_PATH}"
+    )
+    print(f"Saved four-decision extrema to {DESIGN_SPACE_SUMMARY_PATH}")
     print(f"Saved charts to {IMAGES_DIRECTORY}")

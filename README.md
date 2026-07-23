@@ -138,6 +138,9 @@ Os demais parâmetros permanecem fixos:
 | Intervalos de compressão e expansão | 90 por processo |
 | Passo durante a adição de calor | 0,5° |
 
+O valor $L/R=5$ é mantido apenas para reproduzir o caso publicado e fica fora
+do domínio construtivo $[3{,}2,4{,}4]$ usado posteriormente na otimização.
+
 [`src/article_validation.py`](src/article_validation.py) executa os seis testes
 com o polinômio de terceiro grau disponível em
 [`data/data.csv`](data/data.csv). O artigo-base informa uma correlação de quinta
@@ -195,11 +198,11 @@ para expansão, elevando a temperatura de descarga e reduzindo a eficiência.
 
 ## Análise de sensibilidade
 
-[`src/sensitivity_analysis.py`](src/sensitivity_analysis.py) mantém os
-parâmetros geométricos, operacionais e o modelo termofísico local empregados na
-reprodução. Na varredura, apenas a rotação $N$ e o instante de ignição $\theta$
-variam. A duração temporal de 2,5 ms é a definição do estudo necessária para
-converter cada rotação na duração angular $\delta=2\pi N\Delta t_c/60$.
+[`src/sensitivity_analysis.py`](src/sensitivity_analysis.py) preserva um corte
+operacional de 120 pontos, no qual apenas $N$ e $\theta$ variam com a geometria
+herdada, e acrescenta uma triagem de 3.000 pontos que cruza também cinco níveis
+de $r$ e cinco de $L/R$. A duração temporal de 2,5 ms converte cada rotação na
+duração angular $\delta=2\pi N\Delta t_c/60$.
 
 ### Ponto de referência do estudo
 
@@ -220,6 +223,9 @@ No caso-base, os parâmetros fixos são:
 | Fluido de trabalho | CO₂ |
 | Intervalos de compressão e expansão | 90 por processo |
 | Passo durante a adição de calor | 0,5° |
+
+Este ponto de referência também usa a geometria herdada $L/R=5$ e não é uma
+solução admissível da nova busca construtiva.
 
 O histórico dos 325 estados resultantes está em
 [`reports/case_study_base_case_states.csv`](reports/case_study_base_case_states.csv),
@@ -305,6 +311,10 @@ Os dados completos estão em
 [`reports/sensitivity_analysis.csv`](reports/sensitivity_analysis.csv), e os
 extremos globais são salvos separadamente em
 [`reports/sensitivity_analysis_summary.csv`](reports/sensitivity_analysis_summary.csv).
+A triagem construtiva está em
+[`reports/design_space_screening.csv`](reports/design_space_screening.csv), com
+extremos em
+[`reports/design_space_screening_summary.csv`](reports/design_space_screening_summary.csv).
 
 #### Resultados numéricos
 
@@ -399,9 +409,11 @@ não apenas respostas a serem minimizadas isoladamente.
 O estudo resolve simultaneamente as duas otimizações propostas,
 
 $$
-\max_{N,\theta}\;\eta_t(N,\theta)
+\max_{\mathbf{x}}\;\eta_t(\mathbf{x})
 \qquad\text{e}\qquad
-\max_{N,\theta}\;\dot{w}_{liq}(N,\theta),
+\max_{\mathbf{x}}\;\dot{w}_{liq}(\mathbf{x}),
+\qquad
+\mathbf{x}=[N,\theta,r,L/R],
 $$
 
 sem reduzir o problema a uma única soma ponderada global. O resultado de cada
@@ -410,52 +422,78 @@ indicadores exige aceitar perda no outro.
 
 ### Domínio e modelo termodinâmico
 
-As variáveis contínuas são $500\leq N\leq10.000$ rpm e
-$-120^\circ\leq\theta\leq0^\circ$. Esses limites preservam integralmente o domínio
-exploratório do `e2.2_case_study.ipynb`; não devem ser interpretados como mapa de
-calibração de um motor comercial específico. A faixa superior de rotação e a
-dependência do avanço com $N$ são compatíveis com ensaios de motores SI — por
-exemplo, [Y, Khoa e Lim (2021)](https://doi.org/10.3390/en14154523) estudaram
-3.000–10.000 rpm e avanços de 10–45° —, mas o limite de 120° é deliberadamente
-mais amplo porque o FTHA impõe uma duração temporal de combustão constante.
+As quatro decisões são contínuas:
+
+- $500\leq N\leq10.000$ rpm;
+- $-120^\circ\leq\theta\leq0^\circ$;
+- $8\leq r\leq12$;
+- $3{,}2\leq L/R\leq4{,}4$.
+
+$N$ determina a frequência dos ciclos e a duração angular da combustão;
+$\theta$ posiciona a liberação de calor em relação ao PMS. A taxa de
+compressão entra diretamente em $V_c=V_{du}/(r-1)$ e altera os estados da
+compressão e expansão. O intervalo adotado contém a faixa usual de motores SI
+indicada por [Pulkrabek](https://books.google.com/books?id=6TzCFgAACAAJ) e
+preserva $r=12$ do caso FTHA publicado. A razão $L/R$ altera a cinemática do
+pistão e o tempo próximo ao PMS; seu efeito termodinâmico depende do perfil de
+liberação de calor e das perdas, como discutido por
+[Suzuki et al.](https://doi.org/10.4271/2006-32-0098). O limite inferior
+aproxima $L/R=3{,}205$ do Toyota 1ZZ-FE
+([SAE 981087](https://doi.org/10.4271/981087)); o superior reproduz o extremo
+de uma faixa paramétrica publicada. Esses são limites do estudo, não uma
+recomendação universal de projeto.
 
 Com $\Delta t_c=2{,}5$ ms, a duração angular é
 $\delta=6N\Delta t_c$, variando de 7,5° a 150°. Os limites escolhidos mantêm
-$\theta+\delta\leq180^\circ$ em todo o domínio. Volume deslocado, número de
-cilindros, $L/R$, taxa de compressão, estado inicial, $q_{in}$, CO₂ e malha seguem
-os valores usados na reprodução; a correlação termofísica cúbica e as tolerâncias
-são as da implementação local. Cada avaliação chama diretamente o modelo com 90
+$\theta+\delta\leq180^\circ$ em todo o domínio. Volume deslocado e número de
+cilindros ficam fixos porque os objetivos são específicos e o modelo ar-padrão
+não representa transferência de calor às paredes, atrito, enchimento, massa
+dos componentes nem outros efeitos de escala. Nessas hipóteses, variar apenas
+essas grandezas redimensionaria a potência total, sem mudar o caminho de volume
+específico. Já $r$ e $L/R$ alteram diretamente as equações do ciclo. Estado
+inicial, $q_{in}$, CO₂ e malha seguem os valores usados na reprodução. Cada
+avaliação chama diretamente o modelo com 90
 intervalos antes e depois da adição de calor e passo de 0,5° durante a
 combustão; não foi usado metamodelo ou interpolação.
 
-As decisões são normalizadas em $[0,1]^2$ para os operadores não privilegiarem
+As decisões são normalizadas em $[0,1]^4$ para os operadores não privilegiarem
 a rotação apenas por sua escala numérica. Para o mesmo motivo, as funções de
 minimização fornecidas aos algoritmos são $-\eta_t/40\%$ e
 $-\dot{w}_{liq}/27.000$, escalas fixas arredondadas acima dos máximos da análise
-de sensibilidade. Escala positiva não altera dominância de Pareto.
+fatorial de 3.000 pontos. Escala positiva não altera dominância de Pareto.
 
 ### Algoritmos, frameworks e parâmetros
 
-Foram comparados quatro métodos, sempre com 24 candidatos, 20 gerações além da
-população inicial e **504 avaliações exatas por execução**. Cada método foi
-executado 21 vezes com sementes independentes e reproduzíveis; assim, o estudo
-totaliza 84 execuções e 42.336 chamadas do ciclo FTHA. O tamanho 24 fornece boa
-cobertura para apenas dois objetivos e duas decisões, é múltiplo de quatro
-exigido pelo torneio DCD do NSGA-II e mantém viável a repetição estatística do
-modelo termodinâmico. O orçamento idêntico é mais importante para esta
-comparação que reproduzir populações muito maiores usadas em funções-teste
-baratas dos artigos originais.
+Foram comparados quatro métodos com 48 candidatos e 100 gerações completas
+após a população inicial: **4.848 avaliações exatas por execução**. Em dois
+objetivos, 47 partições produzem 48 pontos uniformes do NSGA-III; a população
+coincide com essas direções e é múltipla de quatro para o torneio DCD do
+NSGA-II. As 100 gerações estão no intervalo de 80–120 ciclos examinado no
+[MOPSO original](https://doi.org/10.1109/CEC.2002.1004388) e ampliam a
+profundidade da busca para quatro decisões; sua suficiência é verificada pela
+trajetória do hipervolume, e não presumida pelo número nominal.
+
+Cada método é executado 21 vezes com sementes independentes, totalizando 84
+execuções e 407.232 chamadas do FTHA. Vinte e uma repetições superam as 20 do
+estudo original do NSGA-III, permitem que a mediana corresponda a uma execução
+observada e mantêm o custo viável; são um compromisso de orçamento, não uma
+garantia universal de poder estatístico.
 
 | Método | Implementação e escolhas |
 |---|---|
-| NSGA-II | [DEAP `selNSGA2`](https://deap.readthedocs.io/en/master/api/tools.html#deap.tools.selNSGA2), torneio DCD e elitismo; SBX com $p_c=0{,}9$ e $\eta_c=20$; mutação polinomial com $\eta_m=20$ e probabilidade $1/n_{var}=0{,}5$ por variável. Segue os operadores reais do [NSGA-II de Deb et al.](https://doi.org/10.1109/4235.996017). |
-| NSGA-III | [DEAP `selNSGA3`](https://deap.readthedocs.io/en/stable/examples/nsga3.html), os mesmos operadores do NSGA-II e 24 pontos de referência uniformes ($p=23$). O método foi proposto para muitos objetivos por [Deb e Jain](https://doi.org/10.1109/TEVC.2013.2281535); aqui sua inclusão em duas dimensões é comparativa, não uma alegação de vantagem esperada. |
-| MOPSO | O [PySwarm 1.0](https://pypi.org/project/pyswarm/) fornece PSO escalar. Sua equação e padrões $\omega=c_1=c_2=0{,}5$ foram estendidos com dominância, repositório externo de até 96 soluções e líderes favorecidos por menor densidade, conforme o [MOPSO de Coello Coello e Lechuga](https://doi.org/10.1109/CEC.2002.1004388). Uma perturbação de probabilidade inicial 0,10, decrescente até zero, reduz estagnação. |
-| MOEA/D | [`MOEAD` do pymoo](https://pymoo.org/algorithms/moo/moead.html), 24 direções uniformes, decomposição de Tchebycheff, 10 vizinhos e probabilidade 0,9 de acasalamento na vizinhança; SBX e mutação iguais aos métodos DEAP. A decomposição e cooperação local seguem [Zhang e Li](https://doi.org/10.1109/TEVC.2007.892759). |
+| NSGA-II | [DEAP `selNSGA2`](https://deap.readthedocs.io/en/master/api/tools.html#deap.tools.selNSGA2), torneio DCD e elitismo. SBX usa $p_c=0{,}9$ e $\eta_c=20$; mutação polinomial usa $\eta_m=20$ e $p_m=1/n_{var}=0{,}25$ por variável. Esses valores são uma referência consolidada para variáveis reais no [NSGA-II de Deb et al.](https://doi.org/10.1109/4235.996017): cruzamento frequente e perturbações majoritariamente locais, com uma coordenada mutada em média. |
+| NSGA-III | [DEAP `selNSGA3`](https://deap.readthedocs.io/en/stable/examples/nsga3.html), os mesmos operadores e 48 pontos de referência ($p=47$). Compartilhar os operadores isola o efeito da seleção; não se afirma que seja a configuração original exata de [Deb e Jain](https://doi.org/10.1109/TEVC.2013.2281535). |
+| MOPSO | 48 partículas, $\omega=0{,}4$ e $c_1=c_2=1$, conforme [Coello Coello e Lechuga](https://doi.org/10.1109/CEC.2002.1004388). O arquivo externo $4N=192$ aproxima o repositório de 200 soluções do estudo original. A perturbação local, explicitamente uma adaptação desta implementação, tem probabilidade inicial 0,10, desvio 0,10 no espaço normalizado e decai até zero para combinar exploração inicial e estabilidade final. |
+| MOEA/D | [`MOEAD` do pymoo](https://pymoo.org/algorithms/moo/moead.html), 48 direções, Tchebycheff, 10 vizinhos e probabilidade 0,9 de acasalamento local. Dez vizinhos mantêm aproximadamente os 20% usados com população 100 no [trabalho original](https://doi.org/10.1109/TEVC.2007.892759); 0,9 prioriza cooperação local e reserva 10% para interações globais. |
 
 As versões, sementes e todos os hiperparâmetros estão registrados de forma
 legível por máquina em
 [`reports/multiobjective_configuration.csv`](reports/multiobjective_configuration.csv).
+
+Uma avaliação que não conclua a iteração politrópica dentro da tolerância
+continua contando no orçamento e recebe objetivos escalonados $(0,0)$. Como toda
+solução física útil tem ambos os objetivos de minimização negativos, essa
+penalização é dominada e não entra na frente final.
 
 ### Estatísticas e critério de melhor solução
 
@@ -469,35 +507,36 @@ menor valor desse mesmo escore entre todas as suas frentes.
 
 O hipervolume usa a referência física $(\eta_t,\dot{w}_{liq})=(0,0)$ após as
 escalas fixas. Valores maiores indicam simultaneamente melhor convergência e
-cobertura. O tempo contém seleção e as 504 avaliações exatas, mas não a criação
+cobertura. O tempo contém seleção e as 4.848 avaliações exatas, mas não a criação
 inicial do conjunto de processos, compartilhado por todo o experimento. O
 paralelismo altera apenas o tempo: sementes, avaliações e resultados não
 dependem da ordem de conclusão das tarefas.
 
 ### Resultados das 21 execuções
 
-As 84 execuções concluíram as 42.336 avaliações previstas, sem ponto inválido ou
-falha de convergência. Média e desvio padrão das métricas de qualidade e custo
-foram:
+As 84 execuções concluíram as 407.232 avaliações previstas
+($4\times21\times4.848$). Média e desvio padrão das métricas de qualidade e
+custo foram:
 
 | Algoritmo | Hipervolume médio ± DP | Melhor hipervolume | Tempo médio ± DP [s] |
 |---|---:|---:|---:|
-| NSGA-II | **0,84463 ± 0,00292** | 0,84755 | 9,64 ± 1,11 |
-| NSGA-III | 0,84293 ± 0,00269 | 0,84616 | 9,86 ± 1,01 |
-| MOPSO | 0,83867 ± 0,01387 | **0,85007** | **9,27 ± 0,80** |
-| MOEA/D | 0,82660 ± 0,01048 | 0,84052 | 34,31 ± 1,85 |
+| NSGA-II | **0,845957 ± 0,000148** | 0,846259 | **23,87 ± 2,39** |
+| NSGA-III | 0,844977 ± 0,000755 | 0,846350 | 25,16 ± 2,75 |
+| MOPSO | 0,845922 ± 0,000717 | **0,847139** | 23,89 ± 1,95 |
+| MOEA/D | 0,840189 ± 0,004676 | 0,844662 | 139,55 ± 3,19 |
 
-O NSGA-II apresentou o maior hipervolume médio e baixa dispersão; o NSGA-III
-ficou 0,20% abaixo em média e teve dispersão semelhante. O MOPSO encontrou a
-melhor frente isolada e foi o mais rápido, mas três execuções de qualidade
-inferior aumentaram seu desvio; sua mediana foi 0,84557. O MOEA/D convergiu para
-frentes úteis, porém obteve hipervolume médio 2,13% abaixo do NSGA-II e levou
-3,56 vezes mais tempo. Esse custo decorre da atualização sequencial dos
-subproblemas vizinhos na implementação do pymoo, que aproveita menos o
-paralelismo entre avaliações.
+O NSGA-II apresentou o maior hipervolume médio, mas a diferença para o MOPSO
+foi apenas 0,004% e a diferença para o NSGA-III, 0,116%. O MOPSO encontrou a
+melhor frente isolada; suas medianas e as do NSGA-II também ficaram muito
+próximas (0,846005 e 0,845967, respectivamente). O MOEA/D obteve hipervolume
+médio 0,682% abaixo do NSGA-II e levou 5,85 vezes mais tempo. Esse custo decorre
+da atualização sequencial dos subproblemas vizinhos na implementação do pymoo,
+que aproveita menos o paralelismo entre avaliações. As diferenças pequenas de
+qualidade entre os três primeiros métodos não sustentam uma alegação de
+superioridade universal.
 
-O MOPSO pode devolver até 96 membros de seu repositório, enquanto os outros
-métodos devolvem no máximo 24 membros da população. O hipervolume foi calculado
+O MOPSO pode devolver até 192 membros de seu repositório, enquanto os outros
+métodos devolvem no máximo 48 membros da população. O hipervolume foi calculado
 sobre a saída completa de cada método; portanto, ele mede a frente efetivamente
 entregue ao usuário, mas parte da vantagem de densidade de uma execução MOPSO
 decorre dessa memória externa. A conclusão mais robusta é a estabilidade do
@@ -506,35 +545,40 @@ NSGA-II, não superioridade universal de um algoritmo.
 Os pontos de compromisso de pesos iguais apresentaram as seguintes médias
 entre sementes:
 
-| Algoritmo | $N$ médio ± DP [rpm] | $\theta$ médio ± DP [°] | $\eta_t$ média ± DP [%] | Potência média ± DP [kW/kg] |
-|---|---:|---:|---:|---:|
-| NSGA-II | 5.169 ± 255 | −36,86 ± 2,34 | 35,632 ± 0,229 | 15.344,8 ± 657,9 |
-| NSGA-III | 5.199 ± 189 | −37,44 ± 2,17 | 35,602 ± 0,176 | 15.421,9 ± 483,6 |
-| MOPSO | **5.234 ± 82** | **−37,73 ± 0,76** | **35,586 ± 0,076** | **15.522,2 ± 209,7** |
-| MOEA/D | 5.445 ± 455 | −38,69 ± 5,24 | 35,337 ± 0,407 | 16.018,4 ± 1.154,1 |
+| Algoritmo | $N$ médio ± DP [rpm] | $\theta$ médio ± DP [°] | $r$ médio ± DP | $L/R$ médio ± DP | $\eta_t$ média ± DP [%] | Potência média ± DP [kW/kg] |
+|---|---:|---:|---:|---:|---:|---:|
+| NSGA-II | 5.231 ± 150 | −38,08 ± 1,27 | 11,9996 ± 0,0006 | 4,389 ± 0,032 | 35,527 ± 0,139 | 15.486,1 ± 382,3 |
+| NSGA-III | 5.201 ± 151 | −37,49 ± 1,31 | 11,9994 ± 0,0011 | 4,383 ± 0,027 | 35,558 ± 0,142 | 15.409,4 ± 384,6 |
+| MOPSO | **5.159 ± 103** | −37,07 ± 1,11 | 11,9866 ± 0,0109 | 4,221 ± 0,081 | **35,570 ± 0,098** | **15.292,5 ± 264,3** |
+| MOEA/D | 5.166 ± 134 | **−37,30 ± 1,10** | 11,9998 ± 0,0003 | **4,385 ± 0,026** | 35,590 ± 0,124 | 15.321,5 ± 343,4 |
 
-O negrito na linha do MOPSO destaca a menor dispersão, e não o maior valor de
-cada objetivo. Os quatro métodos localizaram a mesma região de compromisso,
-aproximadamente 5.200 rpm e 38° antes do PMS. O MOEA/D tendeu a selecionar mais
-potência com alguma perda de eficiência e apresentou a maior variabilidade.
+O negrito destaca a menor dispersão de cada coluna, e não o melhor valor de um
+objetivo. Os quatro métodos localizaram a mesma região de compromisso,
+aproximadamente 5.200 rpm, 37–38° antes do PMS, $r\simeq12$ e $L/R$ elevado.
+A concentração de $r$ no limite superior deve ser interpretada como tendência
+do modelo ar-padrão, que não representa detonação nem restrições mecânicas, e
+não como recomendação direta para um motor real.
 
 As melhores soluções de compromisso — menor distância normalizada ao ideal —
 foram:
 
-| Algoritmo | Execução | $N$ [rpm] | $\theta$ [°] | $\eta_t$ [%] | Potência [kW/kg] | Escore |
-|---|---:|---:|---:|---:|---:|---:|
-| NSGA-II | 15 | 5.217,6 | −38,116 | 35,599 | 15.478,7 | 0,398572 |
-| NSGA-III | 14 | 5.201,4 | −37,439 | 35,617 | 15.438,2 | 0,398393 |
-| MOPSO | 14 | 5.230,3 | −37,596 | 35,591 | 15.512,4 | **0,398370** |
-| MOEA/D | 8 | 5.304,6 | −37,389 | 35,519 | 15.701,0 | 0,398735 |
+| Algoritmo | Execução | $N$ [rpm] | $\theta$ [°] | $r$ | $L/R$ | $\eta_t$ [%] | Potência [kW/kg] | Escore |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| NSGA-II | 4 | 5.260,9 | −37,961 | 11,9992 | 4,3998 | 35,507 | 15.566,8 | 0,398507 |
+| NSGA-III | 12 | 5.239,1 | −37,406 | 11,9999 | 4,3999 | 35,528 | 15.511,4 | **0,398451** |
+| MOPSO | 9 | 5.225,9 | −38,194 | 11,9999 | 4,2894 | 35,526 | 15.471,3 | 0,399447 |
+| MOEA/D | 5 | 5.245,3 | −38,007 | 11,9998 | 4,3942 | 35,521 | 15.526,8 | 0,398533 |
 
 As diferenças entre esses escores são pequenas: não há evidência de que uma
 dessas quatro alternativas de compromisso domine as demais. A escolha final
-depende da preferência entre eficiência e potência. Nos extremos da frente
-conjunta, a maior eficiência foi 38,435% em 500 rpm e −3,582°, com
-1.601,4 kW/kg; a maior potência foi 25.675,9 kW/kg em 9.999,9 rpm e −70,873°,
-com eficiência de 30,811%. Esses extremos refinam os valores da varredura
-discreta e confirmam o conflito entre os objetivos.
+depende da preferência entre eficiência e potência. Nos extremos das frentes
+armazenadas, a maior eficiência foi 38,434% em 500,0 rpm, −3,652°,
+$r=12,0000$ e $L/R=4,3730$, com 1.601,5 kW/kg; a maior potência foi
+25.583,0 kW/kg em 10.000,0 rpm, −70,912°, $r=12,0000$ e $L/R=4,4000$, com
+eficiência de 30,700%. Esses extremos refinam a varredura discreta e confirmam
+o conflito entre os objetivos.
+
+![Distribuição das decisões construtivas nas melhores frentes](img/multiobjective_constructive_decisions.png)
 
 ![Frentes de Pareto das melhores execuções](img/multiobjective_pareto_front.png)
 
@@ -547,7 +591,7 @@ impressão preto e branco.
 Os resultados completos podem ser auditados em:
 
 - [`reports/multiobjective_pareto_solutions.csv`](reports/multiobjective_pareto_solutions.csv):
-  3.414 soluções não dominadas, com semente e execução;
+  6.994 soluções não dominadas, com as quatro decisões, semente e execução;
 - [`reports/multiobjective_run_statistics.csv`](reports/multiobjective_run_statistics.csv):
   84 linhas com hipervolume, ponto de compromisso e tempo;
 - [`reports/multiobjective_summary.csv`](reports/multiobjective_summary.csv):
@@ -557,23 +601,22 @@ Os resultados completos podem ser auditados em:
 
 ## Análise de sensibilidade do NSGA-III
 
-A sensibilidade investiga os hiperparâmetros do otimizador, mantendo inalterados
-o domínio de $N$ e $\theta$, os parâmetros físicos do artigo, a malha angular e
-os dois objetivos termodinâmicos. Para separar efeito algorítmico de esforço
-computacional, todas as configurações recebem exatamente 504 avaliações do
-modelo FTHA.
+A sensibilidade investiga os hiperparâmetros do otimizador, mantendo o domínio
+de $[N,\theta,r,L/R]$, os parâmetros físicos fixos, a malha angular e os dois
+objetivos. Para separar efeito algorítmico de esforço, todas as configurações
+recebem exatamente 4.848 avaliações do FTHA.
 
 ### Desenho experimental e fatores
 
 População e número de gerações variam em pares que satisfazem
-$N_{pop}(N_{ger}+1)=504$:
+$N_{pop}(N_{ger}+1)=4.848$:
 
 | População | Gerações | Partições/pontos de referência |
 |---:|---:|---:|
-| 12 | 41 | 11/12 |
-| 24 | 20 | 23/24 |
-| 36 | 13 | 35/36 |
-| 56 | 8 | 55/56 |
+| 12 | 403 | 11/12 |
+| 24 | 201 | 23/24 |
+| 48 | 100 | 47/48 |
+| 101 | 47 | 100/101 |
 
 Em duas dimensões, `uniform_reference_points(nobj=2, p)` produz $p+1$ pontos;
 por isso população e resolução das direções de referência são tratadas como um
@@ -584,22 +627,23 @@ por isso população e resolução das direções de referência são tratadas c
 | Probabilidade de cruzamento, $p_c$ | 0,7; 0,9; 1,0 |
 | Índice de distribuição SBX, $\eta_c$ | 10; 20; 30 |
 | Índice de distribuição da mutação, $\eta_m$ | 10; 20; 40 |
-| Probabilidade de mutação por variável, $p_m$ | 0,25; 0,50; 1,00 |
+| Probabilidade de mutação por variável, $p_m$ | 0,125; 0,25; 0,50 |
 
-O total de 504 avaliações reproduz o custo da configuração original,
-$24(20+1)$. Os níveis de $p_c$ cobrem cruzamento frequente a obrigatório; os
+O total de 4.848 avaliações reproduz o custo da configuração-base,
+$48(100+1)$. Os níveis de $p_c$ cobrem cruzamento frequente a obrigatório; os
 índices de distribuição incluem o valor 20 usado como referência e operadores
-progressivamente mais exploratórios ou concentrados. Como há duas variáveis de
-decisão, $p_m=0{,}5=1/n_{var}$ é o centro natural; 0,25 e 1,00 testam menor e
-maior pressão de mutação. O operador de mutação é chamado para cada descendente
+progressivamente mais exploratórios ou concentrados. Como há quatro decisões,
+$p_m=0{,}25=1/n_{var}$ é o centro natural; 0,125 e 0,50 testam metade e dobro
+dessa pressão de mutação. O operador de mutação é chamado para cada descendente
 e $p_m$ determina, dentro dele, a probabilidade aplicada a cada variável.
 
 O espaço fatorial completo possui 324 combinações. Foi usada uma amostra Latin
 Hypercube discreta, única e reprodutível de 36 configurações. Como 36 é
 divisível por quatro e por três, cada par população/gerações aparece nove vezes
 e cada nível dos demais fatores aparece doze vezes. A configuração usada na
-comparação de algoritmos — 24 indivíduos, 20 gerações, $p_c=0{,}9$,
-$\eta_c=\eta_m=20$ e $p_m=0{,}5$ — foi exigida no desenho como referência.
+comparação de algoritmos — 48 indivíduos, 100 gerações, $p_c=0{,}9$,
+$\eta_c=\eta_m=20$ e $p_m=0{,}25$ — foi exigida no desenho e recebeu o
+identificador determinístico `C17`.
 
 A execução tem duas etapas:
 
@@ -608,7 +652,12 @@ A execução tem duas etapas:
    médios da triagem e pior configuração recebem mais 14 sementes, reservadas
    e comuns, totalizando 21 repetições nas cinco finalistas.
 
-São 322 execuções e 162.288 avaliações exatas. As sementes 8–21 não participam
+Sete sementes comuns equilibram o custo de ordenar 36 combinações e a redução
+de ruído pelo bloqueio. As 14 novas sementes completam 21 repetições, igualam
+a profundidade do benchmark e mantêm a confirmação fora da amostra usada para
+selecionar as finalistas.
+
+São 322 execuções e 1.561.056 avaliações exatas. As sementes 8–21 não participam
 da escolha das finalistas, reduzindo o viés de selecionar e confirmar com os
 mesmos dados. Um checkpoint atômico permite retomar a bateria sem repetir
 avaliações concluídas.
@@ -629,7 +678,17 @@ correlação bisserial de postos e intervalo bootstrap de 95% para a diferença
 média. A configuração recomendada é a de maior hipervolume médio nessas
 sementes reservadas, usando menor desvio como desempate.
 
-### Resultados
+### Situação neste marco
+
+A refinação do NSGA-III será executada depois deste commit intermediário. Por
+isso, ainda não são apresentados valores numéricos para o novo espaço
+$[N,\theta,r,L/R]$. Os CSVs e gráficos `nsga3_sensitivity_*` atualmente
+versionados pertencem ao experimento anterior, com duas decisões e orçamento
+menor, e não devem ser usados para sustentar conclusões sobre o desenho de
+4.848 avaliações descrito acima. Eles serão sobrescritos e novamente validados
+na próxima etapa, antes da revisão numérica do artigo.
+
+<!-- Resultados legados ocultos até a refinação no novo espaço de decisão.
 
 As 322 execuções foram concluídas com o orçamento previsto. Na triagem, as
 configurações `C09`, `C34` e `C22` ocuparam as três primeiras posições; `C23`
@@ -740,12 +799,16 @@ e branco. Os resultados completos estão em:
 - [`reports/nsga3_sensitivity_best_configuration.csv`](reports/nsga3_sensitivity_best_configuration.csv):
   resumo da configuração recomendada, calculado sobre 21 repetições.
 
+-->
+
 ## Interface Python
 
 `simulate_cycle` retorna o histórico termodinâmico completo. Para obter somente
 os indicadores de um ponto de operação, use `evaluate_operating_point`. A função
 `objective_function` retorna os cinco objetivos segundo uma convenção de
-minimização:
+minimização e recebe as decisões na ordem
+`[engine_speed_rpm, ignition_timing_degrees, compression_ratio,
+connecting_rod_to_crank_ratio]`:
 
 1. negativo da eficiência térmica;
 2. negativo da potência líquida específica;
@@ -756,7 +819,7 @@ minimização:
 ```python
 from src.FTHA import OBJECTIVE_NAMES, objective_function
 
-objectives = objective_function([4_500.0, -48.0])
+objectives = objective_function([4_500.0, -48.0, 12.0, 4.0])
 print(dict(zip(OBJECTIVE_NAMES, objectives)))
 ```
 
@@ -769,11 +832,10 @@ print(dict(zip(OBJECTIVE_NAMES, objectives)))
   dos quatro diagramas de verificação;
 - `src/base_case_analysis.py`: caso paramétrico de referência da reprodução, com
   $\theta=-5^\circ$ e $\delta=10^\circ$;
-- `src/sensitivity_analysis.py`: ponto de referência e varredura de rotação e
-  instante de ignição com os parâmetros da implementação local, exportação dos
-  resultados e dez gráficos para impressão em preto e branco;
+- `src/sensitivity_analysis.py`: ponto de referência, corte operacional de 120
+  pontos e triagem fatorial de 3.000 combinações de $N$, $\theta$, $r$ e $L/R$;
 - `src/multiobjective_optimization.py`: comparação reproduzível entre NSGA-II,
-  NSGA-III, MOPSO e MOEA/D para maximizar eficiência e potência em 21 sementes;
+  NSGA-III, MOPSO e MOEA/D em 21 sementes, com checkpoint por réplica;
 - `src/nsga3_sensitivity_analysis.py`: desenho balanceado, triagem, confirmação
   independente e análise estatística dos hiperparâmetros do NSGA-III;
 - `data/data.csv`: coeficientes polinomiais das propriedades dos gases;
@@ -804,7 +866,7 @@ uv run python -m src.base_case_analysis
 uv run python -m src.sensitivity_analysis
 uv run python -m src.multiobjective_optimization
 uv run python -m src.nsga3_sensitivity_analysis
-uv run python -c "from src.FTHA import objective_function; print(objective_function([4500, -48]))"
+uv run python -c "from src.FTHA import objective_function; print(objective_function([4500, -48, 12, 4]))"
 ```
 
 ## Referências
@@ -818,6 +880,18 @@ uv run python -c "from src.FTHA import objective_function; print(objective_funct
   ignition timing on residual gas, effective release energy, and engine
   emissions of a V-twin engine. *Energies*, v. 14, n. 15, 4523, 2021.
   DOI: [10.3390/en14154523](https://doi.org/10.3390/en14154523).
+- PULKRABEK, Willard W. *Engineering Fundamentals of the Internal Combustion
+  Engine*. 2. ed. Pearson Prentice Hall, 2004.
+- SUZUKI, M.; IIJIMA, S.; MAEHARA, H.; MORIYOSHI, Y. Effect of the Ratio
+  Between Connecting-Rod Length and Crank Radius on Thermal Efficiency. SAE
+  Technical Paper 2006-32-0098, 2006.
+  DOI: [10.4271/2006-32-0098](https://doi.org/10.4271/2006-32-0098).
+- ADACHI, S. et al. Development of Toyota 1ZZ-FE Engine. SAE Technical Paper
+  981087, 1998. DOI: [10.4271/981087](https://doi.org/10.4271/981087).
+- DEB, K.; JAIN, H. An Evolutionary Many-Objective Optimization Algorithm Using
+  Reference-Point-Based Nondominated Sorting Approach, Part I. *IEEE
+  Transactions on Evolutionary Computation*, v. 18, n. 4, 2014.
+  DOI: [10.1109/TEVC.2013.2281535](https://doi.org/10.1109/TEVC.2013.2281535).
 - DEB, Kalyanmoy et al. A fast and elitist multiobjective genetic algorithm:
   NSGA-II. *IEEE Transactions on Evolutionary Computation*, v. 6, n. 2,
   p. 182–197, 2002. DOI:

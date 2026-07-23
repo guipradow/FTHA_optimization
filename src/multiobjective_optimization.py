@@ -4,6 +4,10 @@ The two benefits are converted to scaled minimization objectives.  Every
 thermodynamic evaluation uses the physical parameters and the variable-size
 crank-angle grid from the article-based case study.
 
+The four decisions are engine speed, ignition timing, compression ratio, and
+connecting-rod-to-crank ratio.  They are optimized in a unit hypercube so that
+the variation operators see comparable numerical ranges.
+
 NSGA-II and NSGA-III are provided by DEAP, MOEA/D by pymoo, and MOPSO extends
 the PySwarm velocity update with the external nondominated repository proposed
 by Coello Coello and Lechuga.  PySwarm itself exposes a scalar objective API,
@@ -14,12 +18,12 @@ from __future__ import annotations
 
 import argparse
 import importlib.metadata
-import inspect
 import multiprocessing as mp
 import os
+import pickle
 import random
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
@@ -29,6 +33,20 @@ from typing import Callable, Iterable, Sequence
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 os.environ.setdefault("MKL_NUM_THREADS", "1")
+
+
+def _configure_worker_numeric_threads() -> None:
+    """Ensure each spawned process uses one native numerical thread."""
+    for variable_name in (
+        "OPENBLAS_NUM_THREADS",
+        "OMP_NUM_THREADS",
+        "MKL_NUM_THREADS",
+        "NUMEXPR_NUM_THREADS",
+    ):
+        # This runs immediately before ``spawn``.  Children therefore import
+        # NumPy with a single native thread even when the parent environment
+        # defines a larger default, avoiding process-by-thread oversubscription.
+        os.environ[variable_name] = "1"
 
 import matplotlib
 
@@ -46,9 +64,12 @@ from pymoo.operators.mutation.pm import PM
 from pymoo.optimize import minimize
 from pymoo.parallelization import StarmapParallelization
 from pymoo.util.ref_dirs import get_reference_directions
-from pyswarm import pso
-
-from .FTHA import DECISION_LOWER_BOUNDS, DECISION_UPPER_BOUNDS, simulate_cycle
+from .FTHA import (
+    DECISION_LOWER_BOUNDS,
+    DECISION_UPPER_BOUNDS,
+    DECISION_VARIABLE_NAMES,
+    simulate_cycle,
+)
 from .sensitivity_analysis import (
     BLACK_AND_WHITE_SERIES_STYLES,
     CASE_STUDY_PARAMETERS,
@@ -66,8 +87,12 @@ RUN_STATISTICS_PATH = REPORTS_DIRECTORY / "multiobjective_run_statistics.csv"
 SUMMARY_PATH = REPORTS_DIRECTORY / "multiobjective_summary.csv"
 BEST_SOLUTIONS_PATH = REPORTS_DIRECTORY / "multiobjective_best_solutions.csv"
 CONFIGURATION_PATH = REPORTS_DIRECTORY / "multiobjective_configuration.csv"
+CHECKPOINT_PATH = REPORTS_DIRECTORY / "multiobjective_checkpoint.pkl"
 PARETO_FIGURE_PATH = IMAGES_DIRECTORY / "multiobjective_pareto_front.png"
 RUNTIME_FIGURE_PATH = IMAGES_DIRECTORY / "multiobjective_runtime_boxplot.png"
+DECISION_FIGURE_PATH = (
+    IMAGES_DIRECTORY / "multiobjective_constructive_decisions.png"
+)
 
 ALGORITHM_NAMES = ("NSGA-II", "NSGA-III", "MOPSO", "MOEA/D")
 FRAMEWORK_NAMES = {
@@ -78,10 +103,22 @@ FRAMEWORK_NAMES = {
 }
 
 DEFAULT_RUNS = 21
-DEFAULT_POPULATION_SIZE = 24
-DEFAULT_GENERATIONS = 20
+# Forty-eight individuals provide 48 candidate locations along the
+# biobjective front and satisfy the NSGA-II DCD multiple-of-four requirement.
+# One hundred evolutionary cycles lies inside the 80--120 iteration range
+# studied in the original MOPSO experiments and gives four decisions enough
+# search depth.  Including the initial population, this is 48 * 101 = 4,848
+# thermodynamic evaluations per algorithm and run.
+DEFAULT_POPULATION_SIZE = 48
+DEFAULT_GENERATIONS = 100
 DEFAULT_BASE_SEED = 20_260_718
 DEFAULT_WORKERS = min(8, max(1, mp.cpu_count()))
+
+N_DECISION_VARIABLES = len(DECISION_VARIABLE_NAMES)
+if DECISION_LOWER_BOUNDS.shape != (N_DECISION_VARIABLES,) or (
+    DECISION_UPPER_BOUNDS.shape != (N_DECISION_VARIABLES,)
+):
+    raise RuntimeError("Decision names and bounds must have matching dimensions.")
 
 # Fixed scales keep both objective magnitudes of order one.  They are rounded
 # upper limits based on the preceding sensitivity study (38.280% and
@@ -92,17 +129,21 @@ POWER_SCALE_KW_PER_KG = 27_000.0
 SBX_PROBABILITY = 0.9
 SBX_DISTRIBUTION_INDEX = 20.0
 MUTATION_DISTRIBUTION_INDEX = 20.0
-MUTATION_PROBABILITY_PER_VARIABLE = 0.5
+# The conventional 1/n_var rule changes one coordinate on average whenever
+# polynomial mutation is applied; n_var=4 therefore gives p_m=0.25.
+MUTATION_PROBABILITY_PER_VARIABLE = 1.0 / N_DECISION_VARIABLES
 MOEAD_NEIGHBORS = 10
 MOEAD_NEIGHBOR_MATING_PROBABILITY = 0.9
 
-# Reuse the defaults exposed by the installed PySwarm implementation.  The
-# MOPSO extension changes leader selection, not the velocity equation.
-_PYSWARM_SIGNATURE = inspect.signature(pso)
-MOPSO_INERTIA = float(_PYSWARM_SIGNATURE.parameters["omega"].default)
-MOPSO_COGNITIVE = float(_PYSWARM_SIGNATURE.parameters["phip"].default)
-MOPSO_SOCIAL = float(_PYSWARM_SIGNATURE.parameters["phig"].default)
-MOPSO_MUTATION_PROBABILITY = 0.10
+# Coello Coello and Lechuga's MOPSO experiment used omega=0.4 and unit
+# cognitive/social coefficients.  The decaying Gaussian perturbation is a
+# local implementation adaptation (not a parameter from the original paper)
+# used to preserve exploration in the bounded four-dimensional domain.
+MOPSO_INERTIA = 0.4
+MOPSO_COGNITIVE = 1.0
+MOPSO_SOCIAL = 1.0
+MOPSO_PERTURBATION_INITIAL_PROBABILITY = 0.10
+MOPSO_PERTURBATION_STANDARD_DEVIATION = 0.10
 
 
 if not hasattr(creator, "FTHABiObjectiveFitness"):
@@ -130,10 +171,14 @@ class AlgorithmRunResult:
 
 
 def denormalize_decisions(normalized_decisions: Sequence[float]) -> np.ndarray:
-    """Map a point from the unit square to ``[N, theta]``."""
+    """Map a unit-hypercube point to the physical decision bounds."""
     normalized = np.asarray(normalized_decisions, dtype=float)
-    if normalized.shape != (2,):
-        raise ValueError("normalized_decisions must contain exactly two values.")
+    if normalized.shape != (N_DECISION_VARIABLES,):
+        raise ValueError(
+            "normalized_decisions must contain exactly "
+            f"{N_DECISION_VARIABLES} values ordered as "
+            f"{list(DECISION_VARIABLE_NAMES)}."
+        )
     return DECISION_LOWER_BOUNDS + normalized * (
         DECISION_UPPER_BOUNDS - DECISION_LOWER_BOUNDS
     )
@@ -141,19 +186,35 @@ def denormalize_decisions(normalized_decisions: Sequence[float]) -> np.ndarray:
 
 def _evaluate_normalized(normalized_decisions: Sequence[float]) -> tuple[float, float]:
     """Return scaled minimization objectives for one normalized point."""
-    engine_speed_rpm, ignition_timing_degrees = denormalize_decisions(
-        normalized_decisions
+    (
+        engine_speed_rpm,
+        ignition_timing_degrees,
+        compression_ratio,
+        connecting_rod_to_crank_ratio,
+    ) = denormalize_decisions(normalized_decisions)
+    parameters = replace(
+        CASE_STUDY_PARAMETERS,
+        compression_ratio=float(compression_ratio),
+        connecting_rod_to_crank_ratio=float(connecting_rod_to_crank_ratio),
     )
-    result = simulate_cycle(
-        engine_speed_rpm=float(engine_speed_rpm),
-        ignition_timing_degrees=float(ignition_timing_degrees),
-        parameters=CASE_STUDY_PARAMETERS,
-        crank_angle_grid_rad=case_study_crank_angle_grid_rad(
-            float(engine_speed_rpm),
-            float(ignition_timing_degrees),
-            CASE_STUDY_PARAMETERS,
-        ),
-    )
+    try:
+        result = simulate_cycle(
+            engine_speed_rpm=float(engine_speed_rpm),
+            ignition_timing_degrees=float(ignition_timing_degrees),
+            parameters=parameters,
+            crank_angle_grid_rad=case_study_crank_angle_grid_rad(
+                float(engine_speed_rpm),
+                float(ignition_timing_degrees),
+                parameters,
+            ),
+        )
+    except RuntimeError as error:
+        if "converg" not in str(error).lower():
+            raise
+        # Both feasible benefits are positive and become negative minimization
+        # objectives after scaling.  Zero performance is therefore dominated
+        # by every useful point while still consuming its budgeted evaluation.
+        return (0.0, 0.0)
     return (
         -100.0
         * result.metrics.thermal_efficiency
@@ -224,22 +285,22 @@ def _make_deap_toolbox(pool: mp.pool.Pool | None) -> base.Toolbox:
         tools.initRepeat,
         creator.FTHABiObjectiveIndividual,
         toolbox.attr_float,
-        2,
+        N_DECISION_VARIABLES,
     )
     toolbox.register("population", tools.initRepeat, list, toolbox.individual)
     toolbox.register("evaluate", _evaluate_normalized)
     toolbox.register(
         "mate",
         tools.cxSimulatedBinaryBounded,
-        low=[0.0, 0.0],
-        up=[1.0, 1.0],
+        low=[0.0] * N_DECISION_VARIABLES,
+        up=[1.0] * N_DECISION_VARIABLES,
         eta=SBX_DISTRIBUTION_INDEX,
     )
     toolbox.register(
         "mutate",
         tools.mutPolynomialBounded,
-        low=[0.0, 0.0],
-        up=[1.0, 1.0],
+        low=[0.0] * N_DECISION_VARIABLES,
+        up=[1.0] * N_DECISION_VARIABLES,
         eta=MUTATION_DISTRIBUTION_INDEX,
         indpb=MUTATION_PROBABILITY_PER_VARIABLE,
     )
@@ -405,13 +466,14 @@ def run_mopso(
     """Run a Pareto-repository extension of the PySwarm PSO update."""
     rng = np.random.default_rng(seed)
     start = time.perf_counter()
-    positions = rng.random((population_size, 2))
-    velocities = rng.uniform(-1.0, 1.0, size=(population_size, 2))
+    shape = (population_size, N_DECISION_VARIABLES)
+    positions = rng.random(shape)
+    velocities = rng.uniform(-1.0, 1.0, size=shape)
     objectives = _evaluate_many(positions, pool)
     evaluations = population_size
     personal_best_positions = positions.copy()
     personal_best_objectives = objectives.copy()
-    archive_positions = np.empty((0, 2), dtype=float)
+    archive_positions = np.empty((0, N_DECISION_VARIABLES), dtype=float)
     archive_objectives = np.empty((0, 2), dtype=float)
     archive_positions, archive_objectives = _update_archive(
         archive_positions,
@@ -429,10 +491,10 @@ def run_mopso(
         velocities = (
             MOPSO_INERTIA * velocities
             + MOPSO_COGNITIVE
-            * rng.random((population_size, 2))
+            * rng.random(shape)
             * (personal_best_positions - positions)
             + MOPSO_SOCIAL
-            * rng.random((population_size, 2))
+            * rng.random(shape)
             * (leaders - positions)
         )
         velocities = np.clip(velocities, -1.0, 1.0)
@@ -441,15 +503,22 @@ def run_mopso(
         positions = np.clip(positions, 0.0, 1.0)
         velocities[outside] *= -0.5
 
-        mutation_probability = MOPSO_MUTATION_PROBABILITY * (
+        perturbation_probability = MOPSO_PERTURBATION_INITIAL_PROBABILITY * (
             1.0 - generation / max(generations, 1)
         )
-        mutated = rng.random(population_size) < mutation_probability
-        if np.any(mutated):
-            dimensions = rng.integers(0, 2, size=int(mutated.sum()))
-            rows = np.flatnonzero(mutated)
+        perturbed = rng.random(population_size) < perturbation_probability
+        if np.any(perturbed):
+            dimensions = rng.integers(
+                0, N_DECISION_VARIABLES, size=int(perturbed.sum())
+            )
+            rows = np.flatnonzero(perturbed)
             positions[rows, dimensions] = np.clip(
-                positions[rows, dimensions] + rng.normal(0.0, 0.10, len(rows)),
+                positions[rows, dimensions]
+                + rng.normal(
+                    0.0,
+                    MOPSO_PERTURBATION_STANDARD_DEVIATION,
+                    len(rows),
+                ),
                 0.0,
                 1.0,
             )
@@ -486,15 +555,18 @@ def run_mopso(
 
 
 class FTHABiObjectiveProblem(ElementwiseProblem):
-    """pymoo adapter for the normalized two-variable FTHA problem."""
+    """pymoo adapter for the normalized FTHA decision hypercube."""
 
     def __init__(self, runner=None) -> None:
+        runner_arguments = (
+            {} if runner is None else {"elementwise_runner": runner}
+        )
         super().__init__(
-            n_var=2,
+            n_var=N_DECISION_VARIABLES,
             n_obj=2,
-            xl=np.zeros(2),
-            xu=np.ones(2),
-            elementwise_runner=runner,
+            xl=np.zeros(N_DECISION_VARIABLES),
+            xu=np.ones(N_DECISION_VARIABLES),
+            **runner_arguments,
         )
 
     def _evaluate(self, decisions, out, *args, **kwargs) -> None:
@@ -519,7 +591,8 @@ def run_moead(
         prob_neighbor_mating=MOEAD_NEIGHBOR_MATING_PROBABILITY,
         crossover=SBX(prob=SBX_PROBABILITY, eta=SBX_DISTRIBUTION_INDEX),
         mutation=PM(
-            prob=MUTATION_PROBABILITY_PER_VARIABLE,
+            prob=1.0,
+            prob_var=MUTATION_PROBABILITY_PER_VARIABLE,
             eta=MUTATION_DISTRIBUTION_INDEX,
         ),
     )
@@ -553,6 +626,54 @@ RUNNERS: dict[
 }
 
 
+def _checkpoint_metadata(
+    runs: int,
+    population_size: int,
+    generations: int,
+    base_seed: int,
+    algorithm_names: Sequence[str],
+) -> dict[str, object]:
+    return {
+        "format_version": 1,
+        "runs": runs,
+        "population_size": population_size,
+        "generations": generations,
+        "base_seed": base_seed,
+        "algorithm_names": tuple(algorithm_names),
+        "decision_variable_names": DECISION_VARIABLE_NAMES,
+    }
+
+
+def _load_checkpoint(
+    metadata: dict[str, object],
+) -> list[AlgorithmRunResult]:
+    if not CHECKPOINT_PATH.exists():
+        return []
+    try:
+        with CHECKPOINT_PATH.open("rb") as stream:
+            payload = pickle.load(stream)
+    except (OSError, EOFError, pickle.UnpicklingError):
+        return []
+    if payload.get("metadata") != metadata:
+        return []
+    return list(payload.get("results", []))
+
+
+def _save_checkpoint(
+    metadata: dict[str, object],
+    results: Sequence[AlgorithmRunResult],
+) -> None:
+    REPORTS_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    temporary_path = CHECKPOINT_PATH.with_suffix(".tmp")
+    with temporary_path.open("wb") as stream:
+        pickle.dump(
+            {"metadata": metadata, "results": list(results)},
+            stream,
+            protocol=pickle.HIGHEST_PROTOCOL,
+        )
+    temporary_path.replace(CHECKPOINT_PATH)
+
+
 def run_experiment(
     runs: int = DEFAULT_RUNS,
     population_size: int = DEFAULT_POPULATION_SIZE,
@@ -560,8 +681,9 @@ def run_experiment(
     base_seed: int = DEFAULT_BASE_SEED,
     workers: int = DEFAULT_WORKERS,
     algorithm_names: Sequence[str] = ALGORITHM_NAMES,
+    resume: bool = True,
 ) -> list[AlgorithmRunResult]:
-    """Execute all stochastic repetitions, interleaving algorithm order."""
+    """Execute interleaved repetitions and checkpoint every completed run."""
     if runs < 1 or generations < 1:
         raise ValueError("runs and generations must be positive.")
     if population_size < 4 or population_size % 4:
@@ -570,16 +692,30 @@ def run_experiment(
     if unknown:
         raise ValueError(f"Unknown algorithms: {sorted(unknown)}")
 
+    names = list(algorithm_names)
+    metadata = _checkpoint_metadata(
+        runs,
+        population_size,
+        generations,
+        base_seed,
+        names,
+    )
+    results = _load_checkpoint(metadata) if resume else []
+    completed = {(result.algorithm, result.run) for result in results}
+    if results:
+        print(f"Resuming {len(results)} completed algorithm runs.", flush=True)
+
     pool = None
-    results: list[AlgorithmRunResult] = []
     try:
         if workers > 1:
+            _configure_worker_numeric_threads()
             pool = mp.get_context("spawn").Pool(processes=workers)
-        names = list(algorithm_names)
         for run_index in range(1, runs + 1):
             offset = (run_index - 1) % len(names)
             ordered_names = names[offset:] + names[:offset]
             for algorithm_name in ordered_names:
+                if (algorithm_name, run_index) in completed:
+                    continue
                 canonical_index = ALGORITHM_NAMES.index(algorithm_name)
                 seed = base_seed + 10_000 * canonical_index + run_index
                 decisions, objectives, evaluations, runtime = RUNNERS[
@@ -596,6 +732,7 @@ def run_experiment(
                     scaled_objectives=objectives,
                 )
                 results.append(result)
+                _save_checkpoint(metadata, results)
                 print(
                     f"{algorithm_name} run {run_index:02d}/{runs}: "
                     f"{len(objectives)} nondominated solutions, "
@@ -663,8 +800,9 @@ def build_result_tables(
                     "run": result.run,
                     "seed": result.seed,
                     "solution": solution_index,
-                    "engine_speed_rpm": decision[0],
-                    "ignition_timing_degrees": decision[1],
+                    **dict(
+                        zip(DECISION_VARIABLE_NAMES, decision, strict=True)
+                    ),
                     "thermal_efficiency_percent": benefit[0],
                     "net_specific_power_kw_per_kg": benefit[1],
                     "compromise_score": score,
@@ -685,8 +823,14 @@ def build_result_tables(
                 "front_size": len(result.scaled_objectives),
                 "hypervolume": hv_value,
                 "runtime_seconds": result.runtime_seconds,
-                "compromise_engine_speed_rpm": representative_decision[0],
-                "compromise_ignition_timing_degrees": representative_decision[1],
+                **{
+                    f"compromise_{name}": value
+                    for name, value in zip(
+                        DECISION_VARIABLE_NAMES,
+                        representative_decision,
+                        strict=True,
+                    )
+                },
                 "compromise_thermal_efficiency_percent": (
                     representative_benefit[0]
                 ),
@@ -712,60 +856,52 @@ def build_result_tables(
             algorithm_solutions["compromise_score"].idxmin()
         ]
         best_records.append(best.to_dict())
-        summary_records.append(
-            {
-                "algorithm": algorithm_name,
-                "framework": FRAMEWORK_NAMES[algorithm_name],
-                "runs": len(algorithm_runs),
-                "evaluations_per_run_mean": algorithm_runs["evaluations"].mean(),
-                "front_size_mean": algorithm_runs["front_size"].mean(),
-                "front_size_std": algorithm_runs["front_size"].std(ddof=1),
-                "hypervolume_mean": algorithm_runs["hypervolume"].mean(),
-                "hypervolume_std": algorithm_runs["hypervolume"].std(ddof=1),
-                "hypervolume_best": algorithm_runs["hypervolume"].max(),
-                "runtime_seconds_mean": algorithm_runs["runtime_seconds"].mean(),
-                "runtime_seconds_std": algorithm_runs["runtime_seconds"].std(ddof=1),
-                "runtime_seconds_min": algorithm_runs["runtime_seconds"].min(),
-                "runtime_seconds_max": algorithm_runs["runtime_seconds"].max(),
-                "engine_speed_rpm_mean": algorithm_runs[
-                    "compromise_engine_speed_rpm"
-                ].mean(),
-                "engine_speed_rpm_std": algorithm_runs[
-                    "compromise_engine_speed_rpm"
-                ].std(ddof=1),
-                "ignition_timing_degrees_mean": algorithm_runs[
-                    "compromise_ignition_timing_degrees"
-                ].mean(),
-                "ignition_timing_degrees_std": algorithm_runs[
-                    "compromise_ignition_timing_degrees"
-                ].std(ddof=1),
-                "thermal_efficiency_percent_mean": algorithm_runs[
-                    "compromise_thermal_efficiency_percent"
-                ].mean(),
-                "thermal_efficiency_percent_std": algorithm_runs[
-                    "compromise_thermal_efficiency_percent"
-                ].std(ddof=1),
-                "net_specific_power_kw_per_kg_mean": algorithm_runs[
-                    "compromise_net_specific_power_kw_per_kg"
-                ].mean(),
-                "net_specific_power_kw_per_kg_std": algorithm_runs[
-                    "compromise_net_specific_power_kw_per_kg"
-                ].std(ddof=1),
-                "best_engine_speed_rpm": best["engine_speed_rpm"],
-                "best_ignition_timing_degrees": best[
-                    "ignition_timing_degrees"
-                ],
-                "best_thermal_efficiency_percent": best[
-                    "thermal_efficiency_percent"
-                ],
-                "best_net_specific_power_kw_per_kg": best[
-                    "net_specific_power_kw_per_kg"
-                ],
-                "best_compromise_score": best["compromise_score"],
-                "best_run": best["run"],
-                "best_seed": best["seed"],
-            }
-        )
+        summary_record: dict[str, float | int | str] = {
+            "algorithm": algorithm_name,
+            "framework": FRAMEWORK_NAMES[algorithm_name],
+            "runs": len(algorithm_runs),
+            "evaluations_per_run_mean": algorithm_runs["evaluations"].mean(),
+            "front_size_mean": algorithm_runs["front_size"].mean(),
+            "front_size_std": algorithm_runs["front_size"].std(ddof=1),
+            "hypervolume_mean": algorithm_runs["hypervolume"].mean(),
+            "hypervolume_std": algorithm_runs["hypervolume"].std(ddof=1),
+            "hypervolume_best": algorithm_runs["hypervolume"].max(),
+            "runtime_seconds_mean": algorithm_runs["runtime_seconds"].mean(),
+            "runtime_seconds_std": algorithm_runs["runtime_seconds"].std(ddof=1),
+            "runtime_seconds_min": algorithm_runs["runtime_seconds"].min(),
+            "runtime_seconds_max": algorithm_runs["runtime_seconds"].max(),
+            "thermal_efficiency_percent_mean": algorithm_runs[
+                "compromise_thermal_efficiency_percent"
+            ].mean(),
+            "thermal_efficiency_percent_std": algorithm_runs[
+                "compromise_thermal_efficiency_percent"
+            ].std(ddof=1),
+            "net_specific_power_kw_per_kg_mean": algorithm_runs[
+                "compromise_net_specific_power_kw_per_kg"
+            ].mean(),
+            "net_specific_power_kw_per_kg_std": algorithm_runs[
+                "compromise_net_specific_power_kw_per_kg"
+            ].std(ddof=1),
+            "best_thermal_efficiency_percent": best[
+                "thermal_efficiency_percent"
+            ],
+            "best_net_specific_power_kw_per_kg": best[
+                "net_specific_power_kw_per_kg"
+            ],
+            "best_compromise_score": best["compromise_score"],
+            "best_run": best["run"],
+            "best_seed": best["seed"],
+        }
+        for decision_name in DECISION_VARIABLE_NAMES:
+            compromise_column = f"compromise_{decision_name}"
+            summary_record[f"{decision_name}_mean"] = algorithm_runs[
+                compromise_column
+            ].mean()
+            summary_record[f"{decision_name}_std"] = algorithm_runs[
+                compromise_column
+            ].std(ddof=1)
+            summary_record[f"best_{decision_name}"] = best[decision_name]
+        summary_records.append(summary_record)
 
     summary_table = pd.DataFrame.from_records(summary_records)
     best_table = pd.DataFrame.from_records(best_records)
@@ -780,42 +916,97 @@ def configuration_table(
     workers: int,
 ) -> pd.DataFrame:
     """Return a machine-readable record of every fixed optimizer choice."""
-    return pd.DataFrame.from_records(
-        [
-            {
-                "runs_per_algorithm": runs,
-                "population_or_swarm_size": population_size,
-                "generations": generations,
-                "nominal_evaluations_per_run": population_size
-                * (generations + 1),
-                "base_seed": base_seed,
-                "parallel_workers": workers,
-                "engine_speed_lower_rpm": DECISION_LOWER_BOUNDS[0],
-                "engine_speed_upper_rpm": DECISION_UPPER_BOUNDS[0],
-                "ignition_timing_lower_degrees": DECISION_LOWER_BOUNDS[1],
-                "ignition_timing_upper_degrees": DECISION_UPPER_BOUNDS[1],
-                "efficiency_scale_percent": EFFICIENCY_SCALE_PERCENT,
-                "power_scale_kw_per_kg": POWER_SCALE_KW_PER_KG,
-                "sbx_probability": SBX_PROBABILITY,
-                "sbx_distribution_index": SBX_DISTRIBUTION_INDEX,
-                "mutation_distribution_index": MUTATION_DISTRIBUTION_INDEX,
-                "mutation_probability_per_variable": (
-                    MUTATION_PROBABILITY_PER_VARIABLE
-                ),
-                "mopso_inertia": MOPSO_INERTIA,
-                "mopso_cognitive": MOPSO_COGNITIVE,
-                "mopso_social": MOPSO_SOCIAL,
-                "mopso_repository_size": 4 * population_size,
-                "moead_neighbors": min(MOEAD_NEIGHBORS, population_size),
-                "moead_neighbor_mating_probability": (
-                    MOEAD_NEIGHBOR_MATING_PROBABILITY
-                ),
-                "deap_version": importlib.metadata.version("deap"),
-                "pyswarm_version": importlib.metadata.version("pyswarm"),
-                "pymoo_version": importlib.metadata.version("pymoo"),
-            }
-        ]
+    is_baseline_budget = (
+        population_size == DEFAULT_POPULATION_SIZE
+        and generations == DEFAULT_GENERATIONS
     )
+    budget_rationale = (
+        "48 front candidates and 100 evolutionary cycles; the population is "
+        "divisible by four for NSGA-II and 100 lies in the 80-120 iteration "
+        "range studied for the original MOPSO"
+        if is_baseline_budget
+        else "command-line budget override; see population and generation fields"
+    )
+    runs_rationale = (
+        "21 exceeds the 20 repetitions in the original NSGA-III study, gives "
+        "an observed median run, and preserves a feasible budget"
+        if runs == DEFAULT_RUNS
+        else "command-line repetition override; see runs_per_algorithm"
+    )
+    record: dict[str, object] = {
+        "runs_per_algorithm": runs,
+        "number_of_decision_variables": N_DECISION_VARIABLES,
+        "population_or_swarm_size": population_size,
+        "generations": generations,
+        "nominal_evaluations_per_run": population_size * (generations + 1),
+        "is_baseline_budget": is_baseline_budget,
+        "budget_rationale": budget_rationale,
+        "runs_rationale": runs_rationale,
+        "base_seed": base_seed,
+        "parallel_workers": workers,
+        "efficiency_scale_percent": EFFICIENCY_SCALE_PERCENT,
+        "power_scale_kw_per_kg": POWER_SCALE_KW_PER_KG,
+        "nonconvergent_point_policy": (
+            "count evaluation and assign dominated scaled objectives (0, 0)"
+        ),
+        "sbx_probability": SBX_PROBABILITY,
+        "sbx_distribution_index": SBX_DISTRIBUTION_INDEX,
+        "mutation_distribution_index": MUTATION_DISTRIBUTION_INDEX,
+        "genetic_operator_rationale": (
+            "pc=0.9 and eta_c=eta_m=20 are established real-coded NSGA-II "
+            "baselines; common operators isolate selection differences"
+        ),
+        "mutation_probability_per_variable": MUTATION_PROBABILITY_PER_VARIABLE,
+        "mutation_probability_rationale": (
+            "1/n_var, changing one coordinate on average per mutation call"
+        ),
+        "mopso_inertia": MOPSO_INERTIA,
+        "mopso_cognitive": MOPSO_COGNITIVE,
+        "mopso_social": MOPSO_SOCIAL,
+        "mopso_parameter_rationale": (
+            "omega=0.4 and c1=c2=1.0 follow Coello Coello and Lechuga (2004)"
+        ),
+        "mopso_repository_size": 4 * population_size,
+        "mopso_repository_rationale": (
+            "four archive slots per particle balance Pareto diversity and memory"
+        ),
+        "mopso_perturbation_initial_probability": (
+            MOPSO_PERTURBATION_INITIAL_PROBABILITY
+        ),
+        "mopso_perturbation_standard_deviation": (
+            MOPSO_PERTURBATION_STANDARD_DEVIATION
+        ),
+        "mopso_perturbation_rationale": (
+            "decaying local Gaussian adaptation for bounded-domain exploration"
+        ),
+        "moead_neighbors": min(MOEAD_NEIGHBORS, population_size),
+        "moead_neighbor_mating_probability": MOEAD_NEIGHBOR_MATING_PROBABILITY,
+        "moead_rationale": (
+            "10 neighbors preserve approximately the original 20 percent "
+            "neighborhood ratio; delta=0.9 favors local cooperation while "
+            "retaining 10 percent global mating"
+        ),
+        "compression_ratio_bounds_rationale": (
+            "8-12 spans conventional spark-ignition values and the published "
+            "FTHA reference case; it is a study domain, not a universal limit"
+        ),
+        "connecting_rod_ratio_bounds_rationale": (
+            "3.2 approximates the Toyota 1ZZ-FE production geometry and 4.4 "
+            "is the upper end of a published parametric study"
+        ),
+        "deap_version": importlib.metadata.version("deap"),
+        "pyswarm_version": importlib.metadata.version("pyswarm"),
+        "pymoo_version": importlib.metadata.version("pymoo"),
+    }
+    for name, lower, upper in zip(
+        DECISION_VARIABLE_NAMES,
+        DECISION_LOWER_BOUNDS,
+        DECISION_UPPER_BOUNDS,
+        strict=True,
+    ):
+        record[f"{name}_lower_bound"] = lower
+        record[f"{name}_upper_bound"] = upper
+    return pd.DataFrame.from_records([record])
 
 
 def _save_pareto_figure(
@@ -895,6 +1086,91 @@ def _save_runtime_figure(run_table: pd.DataFrame) -> None:
         plt.close(figure)
 
 
+def _save_constructive_decisions_figure(
+    pareto_table: pd.DataFrame,
+    run_table: pd.DataFrame,
+) -> None:
+    """Show how the two constructive decisions vary along the best fronts."""
+    panel_definitions = (
+        (
+            "compression_ratio",
+            "thermal_efficiency_percent",
+            r"Taxa de compressão, $r$",
+            r"Eficiência térmica, $\eta_t$ [%]",
+        ),
+        (
+            "compression_ratio",
+            "net_specific_power_kw_per_kg",
+            r"Taxa de compressão, $r$",
+            r"Potência líquida específica [kW/kg]",
+        ),
+        (
+            "connecting_rod_to_crank_ratio",
+            "thermal_efficiency_percent",
+            r"Razão biela--manivela, $L/R$",
+            r"Eficiência térmica, $\eta_t$ [%]",
+        ),
+        (
+            "connecting_rod_to_crank_ratio",
+            "net_specific_power_kw_per_kg",
+            r"Razão biela--manivela, $L/R$",
+            r"Potência líquida específica [kW/kg]",
+        ),
+    )
+    with plt.rc_context(CHART_STYLE):
+        figure, axes = plt.subplots(
+            2,
+            2,
+            figsize=(8.0, 6.6),
+            constrained_layout=True,
+        )
+        for algorithm_index, algorithm_name in enumerate(ALGORITHM_NAMES):
+            algorithm_runs = run_table[run_table["algorithm"] == algorithm_name]
+            if algorithm_runs.empty:
+                continue
+            best_run = int(
+                algorithm_runs.loc[
+                    algorithm_runs["hypervolume"].idxmax(), "run"
+                ]
+            )
+            front = pareto_table[
+                (pareto_table["algorithm"] == algorithm_name)
+                & (pareto_table["run"] == best_run)
+            ]
+            style = BLACK_AND_WHITE_SERIES_STYLES[algorithm_index]
+            for axis, (x_column, y_column, x_label, y_label) in zip(
+                axes.flat,
+                panel_definitions,
+                strict=True,
+            ):
+                axis.plot(
+                    front[x_column],
+                    front[y_column],
+                    linestyle="none",
+                    marker=style["marker"],
+                    color="black",
+                    markerfacecolor="white",
+                    markeredgecolor="black",
+                    markersize=4.0,
+                    label=f"{algorithm_name} (execução {best_run})",
+                )
+                axis.set_xlabel(x_label)
+                axis.set_ylabel(y_label)
+                axis.grid(True, color="0.82", linewidth=0.6, linestyle=":")
+        handles, labels = axes.flat[0].get_legend_handles_labels()
+        figure.legend(
+            handles,
+            labels,
+            loc="outside upper center",
+            ncols=2,
+            frameon=True,
+            edgecolor="black",
+            fontsize=8,
+        )
+        figure.savefig(DECISION_FIGURE_PATH, dpi=300)
+        plt.close(figure)
+
+
 def save_results(
     results: Sequence[AlgorithmRunResult],
     runs: int,
@@ -916,6 +1192,9 @@ def save_results(
     ).to_csv(CONFIGURATION_PATH, index=False)
     _save_pareto_figure(pareto, per_run)
     _save_runtime_figure(per_run)
+    _save_constructive_decisions_figure(pareto, per_run)
+    if CHECKPOINT_PATH.exists():
+        CHECKPOINT_PATH.unlink()
     return pareto, per_run, summary, best
 
 
@@ -934,6 +1213,11 @@ def _parse_arguments() -> argparse.Namespace:
         choices=ALGORITHM_NAMES,
         default=list(ALGORITHM_NAMES),
     )
+    parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Ignore an existing compatible benchmark checkpoint.",
+    )
     return parser.parse_args()
 
 
@@ -946,6 +1230,7 @@ def main() -> None:
         base_seed=arguments.base_seed,
         workers=arguments.workers,
         algorithm_names=arguments.algorithms,
+        resume=not arguments.no_resume,
     )
     _, _, summary, _ = save_results(
         results,

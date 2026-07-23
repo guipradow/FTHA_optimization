@@ -1,0 +1,6 @@
+metric,unit,minimum_value,minimum_engine_speed_rpm,minimum_ignition_timing_degrees,maximum_value,maximum_engine_speed_rpm,maximum_ignition_timing_degrees,minimum_compression_ratio,maximum_compression_ratio,minimum_connecting_rod_to_crank_ratio,maximum_connecting_rod_to_crank_ratio
+thermal_efficiency_percent,%,3.998533078,500,-120,38.2753607,500,0,8,12,3.2,4.4
+net_specific_power_kw_per_kg,kW/kg,166.6055449,500,-120,25579.60621,10000,-72,8,12,3.2,4.4
+work_consumption_ratio,-,0.31970496,500,0,0.9445784231,500,-120,8,12,4.4,3.2
+maximum_pressure_kpa,kPa,1354.772421,6000,0,7856.303178,500,-120,8,12,3.2,3.2
+maximum_temperature_k,K,1167.323703,10000,-48,1967.449729,500,-120,12,12,3.2,3.2

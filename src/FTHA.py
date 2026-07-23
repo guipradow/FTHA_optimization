@@ -12,7 +12,7 @@ therefore returned with a negative sign.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from typing import Final, Sequence
 
@@ -24,12 +24,21 @@ from .gas_prop import Gas
 
 FloatArray = NDArray[np.float64]
 
-DECISION_VARIABLE_NAMES: Final[tuple[str, str]] = (
+DECISION_VARIABLE_NAMES: Final[tuple[str, str, str, str]] = (
     "engine_speed_rpm",
     "ignition_timing_degrees",
+    "compression_ratio",
+    "connecting_rod_to_crank_ratio",
 )
-DECISION_LOWER_BOUNDS: Final[FloatArray] = np.array([500.0, -120.0])
-DECISION_UPPER_BOUNDS: Final[FloatArray] = np.array([10_000.0, 0.0])
+# Continuous optimization domain. The published validation case uses L/R=5;
+# it remains available through ``simulate_cycle`` but is intentionally outside
+# this design domain.
+DECISION_LOWER_BOUNDS: Final[FloatArray] = np.array(
+    [500.0, -120.0, 8.0, 3.2], dtype=float
+)
+DECISION_UPPER_BOUNDS: Final[FloatArray] = np.array(
+    [10_000.0, 0.0, 12.0, 4.4], dtype=float
+)
 OBJECTIVE_NAMES: Final[tuple[str, str, str, str, str]] = (
     "negative_thermal_efficiency",
     "negative_net_specific_power_kw_per_kg",
@@ -464,36 +473,93 @@ def evaluate_operating_point(
     ).metrics
 
 
+def normalize_decisions(
+    decision_variables: Sequence[float] | FloatArray,
+) -> FloatArray:
+    """Map physical decisions ``[N, theta, r, L/R]`` to the unit hypercube."""
+    decisions = _validate_decision_vector(
+        decision_variables,
+        lower_bounds=DECISION_LOWER_BOUNDS,
+        upper_bounds=DECISION_UPPER_BOUNDS,
+        vector_name="decision_variables",
+        bounds_description="design-space bounds",
+    )
+    return (decisions - DECISION_LOWER_BOUNDS) / (
+        DECISION_UPPER_BOUNDS - DECISION_LOWER_BOUNDS
+    )
+
+
+def denormalize_decisions(
+    normalized_decisions: Sequence[float] | FloatArray,
+) -> FloatArray:
+    """Map normalized decisions from ``[0, 1]^4`` to physical units."""
+    normalized = _validate_decision_vector(
+        normalized_decisions,
+        lower_bounds=np.zeros(4, dtype=float),
+        upper_bounds=np.ones(4, dtype=float),
+        vector_name="normalized_decisions",
+        bounds_description="unit-hypercube bounds",
+    )
+    return DECISION_LOWER_BOUNDS + normalized * (
+        DECISION_UPPER_BOUNDS - DECISION_LOWER_BOUNDS
+    )
+
+
+def _validate_decision_vector(
+    values: Sequence[float] | FloatArray,
+    *,
+    lower_bounds: FloatArray,
+    upper_bounds: FloatArray,
+    vector_name: str,
+    bounds_description: str,
+) -> FloatArray:
+    """Validate a four-dimensional physical or normalized decision vector."""
+    decisions = np.asarray(values, dtype=float)
+    if decisions.shape != (4,):
+        raise ValueError(f"{vector_name} must contain exactly four values.")
+    if not np.all(np.isfinite(decisions)):
+        raise ValueError(f"{vector_name} must contain only finite values.")
+    if np.any(decisions < lower_bounds) or np.any(decisions > upper_bounds):
+        raise ValueError(
+            f"{vector_name} are outside the {bounds_description}: "
+            f"{lower_bounds.tolist()} to {upper_bounds.tolist()}."
+        )
+    return decisions
+
+
 def objective_function(
     decision_variables: Sequence[float] | FloatArray,
     parameters: ModelParameters = DEFAULT_PARAMETERS,
 ) -> FloatArray:
-    """Evaluate the five notebook indicators as minimization objectives.
+    """Evaluate the five model indicators as minimization objectives.
 
     Decision variables must be ordered as ``[engine_speed_rpm,
-    ignition_timing_degrees]`` and lie inside the study domain defined by
-    ``DECISION_LOWER_BOUNDS`` and ``DECISION_UPPER_BOUNDS``.
+    ignition_timing_degrees, compression_ratio,
+    connecting_rod_to_crank_ratio]`` and lie inside the design domain defined
+    by ``DECISION_LOWER_BOUNDS`` and ``DECISION_UPPER_BOUNDS``.
+
+    ``parameters`` supplies the fixed thermodynamic and numerical settings.
+    Its compression ratio and connecting-rod ratio are replaced by the two
+    geometric decisions for this evaluation; the frozen input object itself is
+    not modified.
     """
-    decisions = np.asarray(decision_variables, dtype=float)
-    if decisions.shape != (2,):
-        raise ValueError(
-            "decision_variables must contain exactly [engine_speed_rpm, "
-            "ignition_timing_degrees]."
-        )
-    if not np.all(np.isfinite(decisions)):
-        raise ValueError("decision_variables must contain only finite values.")
-    if np.any(decisions < DECISION_LOWER_BOUNDS) or np.any(
-        decisions > DECISION_UPPER_BOUNDS
-    ):
-        raise ValueError(
-            "decision_variables are outside the notebook study bounds: "
-            f"{DECISION_LOWER_BOUNDS.tolist()} to {DECISION_UPPER_BOUNDS.tolist()}."
-        )
+    decisions = _validate_decision_vector(
+        decision_variables,
+        lower_bounds=DECISION_LOWER_BOUNDS,
+        upper_bounds=DECISION_UPPER_BOUNDS,
+        vector_name="decision_variables",
+        bounds_description="design-space bounds",
+    )
+    design_parameters = replace(
+        parameters,
+        compression_ratio=float(decisions[2]),
+        connecting_rod_to_crank_ratio=float(decisions[3]),
+    )
 
     metrics = evaluate_operating_point(
         engine_speed_rpm=decisions[0],
         ignition_timing_degrees=decisions[1],
-        parameters=parameters,
+        parameters=design_parameters,
     )
     return metrics.as_minimization_objectives()
 
@@ -507,7 +573,9 @@ __all__ = [
     "DEFAULT_PARAMETERS",
     "ModelParameters",
     "OBJECTIVE_NAMES",
+    "denormalize_decisions",
     "evaluate_operating_point",
+    "normalize_decisions",
     "objective_function",
     "simulate_cycle",
 ]

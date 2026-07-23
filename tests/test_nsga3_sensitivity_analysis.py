@@ -68,6 +68,12 @@ class TestNSGA3SensitivityAnalysis(unittest.TestCase):
             )
 
     def test_all_population_generation_pairs_use_the_same_budget(self) -> None:
+        self.assertEqual(EVALUATIONS_PER_RUN, 4_848)
+        self.assertEqual(
+            POPULATION_GENERATION_LEVELS,
+            ((12, 403), (24, 201), (48, 100), (101, 47)),
+        )
+        self.assertEqual(MUTATION_PROBABILITY_LEVELS, (0.125, 0.25, 0.5))
         for configuration in self.design:
             self.assertEqual(configuration.evaluations, EVALUATIONS_PER_RUN)
             self.assertEqual(
@@ -86,7 +92,7 @@ class TestNSGA3SensitivityAnalysis(unittest.TestCase):
                     seed=1,
                     runtime_seconds=1.0,
                     evaluations=EVALUATIONS_PER_RUN,
-                    normalized_decisions=np.array([[0.5, 0.5]]),
+                    normalized_decisions=np.array([[0.5, 0.5, 0.5, 0.5]]),
                     scaled_objectives=np.array([[-quality, -quality]]),
                     convergence=np.array([[0.0, 24.0, quality**2]]),
                 )
@@ -109,7 +115,10 @@ class TestNSGA3SensitivityAnalysis(unittest.TestCase):
         side_effect=RuntimeError("no convergence"),
     )
     def test_nonconvergent_model_point_receives_dominated_penalty(self, _) -> None:
-        self.assertEqual(_safe_evaluate_normalized([0.5, 0.5]), (0.0, 0.0))
+        self.assertEqual(
+            _safe_evaluate_normalized([0.5, 0.5, 0.5, 0.5]),
+            (0.0, 0.0),
+        )
 
     @patch(
         "src.nsga3_sensitivity_analysis._evaluate_normalized",
@@ -117,7 +126,7 @@ class TestNSGA3SensitivityAnalysis(unittest.TestCase):
     )
     def test_unrelated_runtime_error_is_not_hidden(self, _) -> None:
         with self.assertRaisesRegex(RuntimeError, "unexpected model failure"):
-            _safe_evaluate_normalized([0.5, 0.5])
+            _safe_evaluate_normalized([0.5, 0.5, 0.5, 0.5])
 
     def test_checkpoint_uses_portable_records(self) -> None:
         result = self._synthetic_result(self.design[0], 1, 0.75)
@@ -176,7 +185,12 @@ class TestNSGA3SensitivityAnalysis(unittest.TestCase):
         self.assertEqual(len(tables["summary"]), 36)
         self.assertEqual(len(tables["pairwise"]), 4)
         self.assertEqual(len(tables["best"]), 1)
-        self.assertEqual(int(tables["runs"]["evaluations"].min()), 504)
+        self.assertEqual(int(tables["runs"]["evaluations"].min()), 4_848)
+        self.assertIn("compression_ratio", tables["pareto"].columns)
+        self.assertIn(
+            "compromise_connecting_rod_to_crank_ratio_mean",
+            tables["summary"].columns,
+        )
 
     @staticmethod
     def _synthetic_result(configuration, run: int, quality: float):
@@ -189,7 +203,12 @@ class TestNSGA3SensitivityAnalysis(unittest.TestCase):
             seed=run,
             runtime_seconds=1.0,
             evaluations=EVALUATIONS_PER_RUN,
-            normalized_decisions=np.array([[0.25, 0.75], [0.75, 0.25]]),
+            normalized_decisions=np.array(
+                [
+                    [0.25, 0.75, 0.25, 0.75],
+                    [0.75, 0.25, 0.75, 0.25],
+                ]
+            ),
             scaled_objectives=objectives,
             convergence=np.array(
                 [

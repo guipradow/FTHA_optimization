@@ -1,7 +1,7 @@
 """Sensitivity analysis of NSGA-III hyperparameters for the FTHA problem.
 
 The experiment uses a balanced discrete Latin hypercube for screening and a
-held-out confirmation stage.  Every run has exactly 504 direct thermodynamic
+held-out confirmation stage.  Every run has exactly 4,848 direct thermodynamic
 model evaluations, irrespective of population size.  Common random seeds make
 comparisons paired, while runs 8--21 are never used to select configurations.
 """
@@ -39,13 +39,16 @@ from .multiobjective_optimization import (
     BLACK_AND_WHITE_SERIES_STYLES,
     CHART_STYLE,
     EFFICIENCY_SCALE_PERCENT,
+    N_DECISION_VARIABLES,
     POWER_SCALE_KW_PER_KG,
     _clean_front,
     _compromise_scores,
+    _configure_worker_numeric_threads,
     _evaluate_normalized,
     denormalize_decisions,
     nondominated_indices,
 )
+from .FTHA import DECISION_VARIABLE_NAMES
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -74,25 +77,38 @@ CONFIRMATION_FIGURE_PATH = (
 CONVERGENCE_FIGURE_PATH = IMAGES_DIRECTORY / "nsga3_sensitivity_convergence.png"
 
 SCREENING_CONFIGURATION_COUNT = 36
+# Seven common seeds provide an initial blocked ranking of all 36 combinations
+# at manageable cost.  Fourteen held-out seeds then bring five finalists to 21
+# total runs, matching the benchmark depth without selecting and confirming on
+# the same stochastic samples.
 SCREENING_RUNS = 7
 TOTAL_CONFIRMATION_RUNS = 21
 CONFIRMATION_CONFIGURATION_COUNT = 5
-EVALUATIONS_PER_RUN = 504
+EVALUATIONS_PER_RUN = 4_848
 DESIGN_SEED = 20_260_719
 RUN_SEED_BASE = 31_000_000
 DEFAULT_WORKERS = min(8, max(1, mp.cpu_count()))
 BOOTSTRAP_RESAMPLES = 10_000
 
 POPULATION_GENERATION_LEVELS = (
-    (12, 41),
-    (24, 20),
-    (36, 13),
-    (56, 8),
+    # All four pairs include the initial population and therefore satisfy
+    # population * (generations + 1) == 4,848.  They isolate the breadth/depth
+    # trade-off without confounding it with computational effort.
+    (12, 403),
+    (24, 201),
+    (48, 100),
+    (101, 47),
 )
 CROSSOVER_PROBABILITY_LEVELS = (0.7, 0.9, 1.0)
 CROSSOVER_ETA_LEVELS = (10.0, 20.0, 30.0)
 MUTATION_ETA_LEVELS = (10.0, 20.0, 40.0)
-MUTATION_PROBABILITY_LEVELS = (0.25, 0.5, 1.0)
+# Half, exactly, and twice the conventional 1/n_var mutation rule.  With four
+# decisions these levels test both more local and more disruptive variation.
+MUTATION_PROBABILITY_LEVELS = (
+    0.5 / N_DECISION_VARIABLES,
+    1.0 / N_DECISION_VARIABLES,
+    2.0 / N_DECISION_VARIABLES,
+)
 
 FACTOR_COLUMNS = (
     "population_size",
@@ -154,7 +170,13 @@ class SensitivityRunResult:
     convergence: np.ndarray
 
 
-BASELINE_PARAMETER_TUPLE = (24, 0.9, 20.0, 20.0, 0.5)
+BASELINE_PARAMETER_TUPLE = (
+    48,
+    0.9,
+    20.0,
+    20.0,
+    1.0 / N_DECISION_VARIABLES,
+)
 
 
 def generate_screening_design(seed: int = DESIGN_SEED) -> list[NSGA3Configuration]:
@@ -220,6 +242,19 @@ def _configuration_record(configuration: NSGA3Configuration) -> dict[str, object
     record = asdict(configuration)
     record["reference_partitions"] = configuration.reference_partitions
     record["nominal_evaluations"] = configuration.evaluations
+    record["budget_rationale"] = (
+        "all population/generation pairs use 4,848 evaluations to separate "
+        "search breadth from search depth at equal thermodynamic cost"
+    )
+    record["crossover_probability_rationale"] = (
+        "0.7 and 1.0 bracket the conventional 0.9 baseline"
+    )
+    record["distribution_index_rationale"] = (
+        "lower eta broadens variation; higher eta tests increasingly local search"
+    )
+    record["mutation_probability_rationale"] = (
+        "half, equal to, and twice 1/n_var for four decisions"
+    )
     return record
 
 
@@ -231,21 +266,21 @@ def _make_toolbox(configuration: NSGA3Configuration) -> base.Toolbox:
         tools.initRepeat,
         creator.FTHABiObjectiveIndividual,
         toolbox.attr_float,
-        2,
+        N_DECISION_VARIABLES,
     )
     toolbox.register("population", tools.initRepeat, list, toolbox.individual)
     toolbox.register(
         "mate",
         tools.cxSimulatedBinaryBounded,
-        low=[0.0, 0.0],
-        up=[1.0, 1.0],
+        low=[0.0] * N_DECISION_VARIABLES,
+        up=[1.0] * N_DECISION_VARIABLES,
         eta=configuration.crossover_eta,
     )
     toolbox.register(
         "mutate",
         tools.mutPolynomialBounded,
-        low=[0.0, 0.0],
-        up=[1.0, 1.0],
+        low=[0.0] * N_DECISION_VARIABLES,
+        up=[1.0] * N_DECISION_VARIABLES,
         eta=configuration.mutation_eta,
         indpb=configuration.mutation_probability_per_variable,
     )
@@ -296,7 +331,10 @@ def run_nsga3_configuration(
 ) -> SensitivityRunResult:
     """Run one parameterized NSGA-III replication and retain convergence."""
     if configuration.evaluations != EVALUATIONS_PER_RUN:
-        raise ValueError("Every configuration must have exactly 504 evaluations.")
+        raise ValueError(
+            f"Every configuration must have exactly {EVALUATIONS_PER_RUN} "
+            "evaluations."
+        )
     random.seed(seed)
     np.random.seed(seed)
     toolbox = _make_toolbox(configuration)
@@ -502,6 +540,7 @@ def execute_sensitivity_analysis(
     pool = None
     try:
         if workers > 1:
+            _configure_worker_numeric_threads()
             pool = mp.get_context("spawn").Pool(processes=workers)
         _run_missing_stage(
             configurations,
@@ -607,8 +646,9 @@ def build_numerical_tables(
                     "run": result.run,
                     "seed": result.seed,
                     "solution": solution,
-                    "engine_speed_rpm": decision[0],
-                    "ignition_timing_degrees": decision[1],
+                    **dict(
+                        zip(DECISION_VARIABLE_NAMES, decision, strict=True)
+                    ),
                     "thermal_efficiency_percent": benefit[0],
                     "net_specific_power_kw_per_kg": benefit[1],
                     "compromise_score": score,
@@ -635,10 +675,14 @@ def build_numerical_tables(
                 "runtime_seconds": result.runtime_seconds,
                 "maximum_efficiency_percent": benefits[:, 0].max(),
                 "maximum_power_kw_per_kg": benefits[:, 1].max(),
-                "compromise_engine_speed_rpm": decisions[compromise_index, 0],
-                "compromise_ignition_timing_degrees": decisions[
-                    compromise_index, 1
-                ],
+                **{
+                    f"compromise_{name}": value
+                    for name, value in zip(
+                        DECISION_VARIABLE_NAMES,
+                        decisions[compromise_index],
+                        strict=True,
+                    )
+                },
                 "compromise_efficiency_percent": benefits[compromise_index, 0],
                 "compromise_power_kw_per_kg": benefits[compromise_index, 1],
                 "compromise_score": scores[compromise_index],
@@ -687,59 +731,52 @@ def build_numerical_tables(
         interval_low, interval_high = _bootstrap_mean_interval(
             rows["hypervolume"], DESIGN_SEED + configuration_index
         )
-        summary_records.append(
-            {
-                **_configuration_record(configuration),
-                "is_baseline": (
-                    configuration.parameter_tuple() == BASELINE_PARAMETER_TUPLE
-                ),
-                "is_confirmed": configuration.configuration_id in confirmation_ids,
-                "screening_rank": screening_rank[configuration.configuration_id],
-                "runs": len(rows),
-                "screening_hypervolume_mean": screening["hypervolume"].mean(),
-                "screening_hypervolume_std": screening["hypervolume"].std(ddof=1),
-                "confirmation_hypervolume_mean": confirmation[
-                    "hypervolume"
-                ].mean(),
-                "confirmation_hypervolume_std": confirmation[
-                    "hypervolume"
-                ].std(ddof=1),
-                "hypervolume_mean": rows["hypervolume"].mean(),
-                "hypervolume_std": rows["hypervolume"].std(ddof=1),
-                "hypervolume_ci95_low": interval_low,
-                "hypervolume_ci95_high": interval_high,
-                "igd_plus_mean": rows["igd_plus"].mean(),
-                "igd_plus_std": rows["igd_plus"].std(ddof=1),
-                "spacing_mean": rows["spacing"].mean(),
-                "runtime_seconds_mean": rows["runtime_seconds"].mean(),
-                "runtime_seconds_std": rows["runtime_seconds"].std(ddof=1),
-                "front_size_mean": rows["front_size"].mean(),
-                "compromise_engine_speed_rpm_mean": rows[
-                    "compromise_engine_speed_rpm"
-                ].mean(),
-                "compromise_engine_speed_rpm_std": rows[
-                    "compromise_engine_speed_rpm"
-                ].std(ddof=1),
-                "compromise_ignition_timing_degrees_mean": rows[
-                    "compromise_ignition_timing_degrees"
-                ].mean(),
-                "compromise_ignition_timing_degrees_std": rows[
-                    "compromise_ignition_timing_degrees"
-                ].std(ddof=1),
-                "compromise_efficiency_percent_mean": rows[
-                    "compromise_efficiency_percent"
-                ].mean(),
-                "compromise_efficiency_percent_std": rows[
-                    "compromise_efficiency_percent"
-                ].std(ddof=1),
-                "compromise_power_kw_per_kg_mean": rows[
-                    "compromise_power_kw_per_kg"
-                ].mean(),
-                "compromise_power_kw_per_kg_std": rows[
-                    "compromise_power_kw_per_kg"
-                ].std(ddof=1),
-            }
-        )
+        summary_record: dict[str, object] = {
+            **_configuration_record(configuration),
+            "is_baseline": (
+                configuration.parameter_tuple() == BASELINE_PARAMETER_TUPLE
+            ),
+            "is_confirmed": configuration.configuration_id in confirmation_ids,
+            "screening_rank": screening_rank[configuration.configuration_id],
+            "runs": len(rows),
+            "screening_hypervolume_mean": screening["hypervolume"].mean(),
+            "screening_hypervolume_std": screening["hypervolume"].std(ddof=1),
+            "confirmation_hypervolume_mean": confirmation["hypervolume"].mean(),
+            "confirmation_hypervolume_std": confirmation["hypervolume"].std(
+                ddof=1
+            ),
+            "hypervolume_mean": rows["hypervolume"].mean(),
+            "hypervolume_std": rows["hypervolume"].std(ddof=1),
+            "hypervolume_ci95_low": interval_low,
+            "hypervolume_ci95_high": interval_high,
+            "igd_plus_mean": rows["igd_plus"].mean(),
+            "igd_plus_std": rows["igd_plus"].std(ddof=1),
+            "spacing_mean": rows["spacing"].mean(),
+            "runtime_seconds_mean": rows["runtime_seconds"].mean(),
+            "runtime_seconds_std": rows["runtime_seconds"].std(ddof=1),
+            "front_size_mean": rows["front_size"].mean(),
+            "compromise_efficiency_percent_mean": rows[
+                "compromise_efficiency_percent"
+            ].mean(),
+            "compromise_efficiency_percent_std": rows[
+                "compromise_efficiency_percent"
+            ].std(ddof=1),
+            "compromise_power_kw_per_kg_mean": rows[
+                "compromise_power_kw_per_kg"
+            ].mean(),
+            "compromise_power_kw_per_kg_std": rows[
+                "compromise_power_kw_per_kg"
+            ].std(ddof=1),
+        }
+        for decision_name in DECISION_VARIABLE_NAMES:
+            compromise_column = f"compromise_{decision_name}"
+            summary_record[f"{compromise_column}_mean"] = rows[
+                compromise_column
+            ].mean()
+            summary_record[f"{compromise_column}_std"] = rows[
+                compromise_column
+            ].std(ddof=1)
+        summary_records.append(summary_record)
     summary_table = pd.DataFrame.from_records(summary_records)
 
     effects_table = _main_effects_table(run_table)

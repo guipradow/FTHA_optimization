@@ -17,6 +17,8 @@ from src.sensitivity_analysis import (
     BASE_CASE_PRESSURE_VOLUME_FIGURE,
     BASE_CASE_TEMPERATURE_VOLUME_FIGURE,
     CASE_STUDY_PARAMETERS,
+    COMPRESSION_RATIOS,
+    CONNECTING_ROD_TO_CRANK_RATIOS,
     ENGINE_SPEEDS_RPM,
     IGNITION_TIMINGS_DEGREES,
     RESULT_METRICS,
@@ -24,6 +26,7 @@ from src.sensitivity_analysis import (
     base_case_summary,
     case_study_crank_angle_grid_rad,
     calculate_case_study_base_case,
+    calculate_design_space_screening_results,
     calculate_sensitivity_results,
     summarize_sensitivity_results,
 )
@@ -134,6 +137,57 @@ class SensitivityAnalysisTests(unittest.TestCase):
 
         summary = summarize_sensitivity_results(results)
         self.assertEqual(tuple(summary["metric"]), tuple(zip(*RESULT_METRICS))[0])
+
+    @patch("src.sensitivity_analysis.simulate_cycle")
+    def test_four_decision_screening_covers_geometric_domain(
+        self,
+        simulate_cycle_mock,
+    ) -> None:
+        simulate_cycle_mock.return_value = SimpleNamespace(
+            metrics=CycleMetrics(
+                thermal_efficiency=0.3,
+                compression_work_kj_per_kg=200.0,
+                expansion_work_kj_per_kg=500.0,
+                net_specific_work_kj_per_kg=300.0,
+                net_specific_power_kw_per_kg=10_000.0,
+                work_consumption_ratio=0.4,
+                maximum_pressure_kpa=4_000.0,
+                maximum_temperature_k=1_400.0,
+            )
+        )
+
+        results = calculate_design_space_screening_results()
+
+        expected_points = (
+            len(ENGINE_SPEEDS_RPM)
+            * len(IGNITION_TIMINGS_DEGREES)
+            * len(COMPRESSION_RATIOS)
+            * len(CONNECTING_ROD_TO_CRANK_RATIOS)
+        )
+        self.assertEqual(len(results), expected_points)
+        self.assertEqual(simulate_cycle_mock.call_count, expected_points)
+        np.testing.assert_allclose(
+            np.sort(results["compression_ratio"].unique()),
+            COMPRESSION_RATIOS,
+        )
+        np.testing.assert_allclose(
+            np.sort(results["connecting_rod_to_crank_ratio"].unique()),
+            CONNECTING_ROD_TO_CRANK_RATIOS,
+        )
+        self.assertTrue(
+            all(
+                call.kwargs["parameters"].compression_ratio
+                in COMPRESSION_RATIOS
+                for call in simulate_cycle_mock.call_args_list
+            )
+        )
+
+        summary = summarize_sensitivity_results(results)
+        self.assertIn("minimum_compression_ratio", summary.columns)
+        self.assertIn(
+            "maximum_connecting_rod_to_crank_ratio",
+            summary.columns,
+        )
 
 
 if __name__ == "__main__":
