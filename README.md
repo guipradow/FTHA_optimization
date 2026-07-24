@@ -3,8 +3,9 @@
 Modelo numérico do ciclo Otto com adição de calor em tempo finito (FTHA,
 *Finite-Time Heat Addition*), baseado no trabalho de Naaktgeboren (2017). O
 projeto teve origem em um estudo da disciplina de Máquinas Térmicas do curso de
-Engenharia Mecânica da UTFPR, campus Guarapuava, e prepara o modelo
-termodinâmico para uso posterior em otimização multiobjetivo.
+Engenharia Mecânica da UTFPR, campus Guarapuava. O repositório reúne o modelo
+termodinâmico, sua verificação, a análise paramétrica e a otimização
+multiobjetivo de eficiência e potência.
 
 A implementação reutilizável encontra-se em [`src/FTHA.py`](src/FTHA.py).
 
@@ -678,15 +679,16 @@ correlação bisserial de postos e intervalo bootstrap de 95% para a diferença
 média. A configuração recomendada é a de maior hipervolume médio nessas
 sementes reservadas, usando menor desvio como desempate.
 
-### Situação neste marco
+### Situação dos resultados do refinamento
 
-A refinação do NSGA-III será executada depois deste commit intermediário. Por
-isso, ainda não são apresentados valores numéricos para o novo espaço
-$[N,\theta,r,L/R]$. Os CSVs e gráficos `nsga3_sensitivity_*` atualmente
-versionados pertencem ao experimento anterior, com duas decisões e orçamento
-menor, e não devem ser usados para sustentar conclusões sobre o desenho de
-4.848 avaliações descrito acima. Eles serão sobrescritos e novamente validados
-na próxima etapa, antes da revisão numérica do artigo.
+O refinamento do NSGA-III ainda não foi reexecutado depois da ampliação do
+espaço para $[N,\theta,r,L/R]$. Por isso, ainda não há finalistas nem
+configuração recomendada para o novo desenho. Os CSVs e gráficos
+`nsga3_sensitivity_*` atualmente versionados pertencem ao experimento anterior,
+com duas decisões e 504 avaliações por configuração, e não devem ser usados
+para sustentar conclusões sobre o protocolo de 4.848 avaliações descrito acima.
+O artigo omite deliberadamente esses números legados. A próxima execução
+sobrescreverá e validará novamente os artefatos antes de qualquer comparação.
 
 <!-- Resultados legados ocultos até a refinação no novo espaço de decisão.
 
@@ -823,6 +825,11 @@ objectives = objective_function([4_500.0, -48.0, 12.0, 4.0])
 print(dict(zip(OBJECTIVE_NAMES, objectives)))
 ```
 
+Esse exemplo usa `DEFAULT_PARAMETERS` e a malha padrão da interface geral. O
+benchmark e o refinamento usam `CASE_STUDY_PARAMETERS` e a malha angular
+variável definida em `src/sensitivity_analysis.py`; portanto, o exemplo isolado
+não reproduz uma linha dos experimentos estocásticos.
+
 ## Estrutura do projeto
 
 - `src/FTHA.py`: modelo termodinâmico e função objetivo;
@@ -842,7 +849,8 @@ print(dict(zip(OBJECTIVE_NAMES, objectives)))
 - `img/`: artefatos gráficos gerados;
 - `reports/`: histórico e resumo do ponto de referência, resultados tabulares
   da varredura, frentes de Pareto, estatísticas por execução e resumo da
-  otimização;
+  otimização. Os arquivos `nsga3_sensitivity_*` permanecem legados até a nova
+  execução indicada acima;
 - `tests/test_article_validation.py`: verificação numérica dos seis casos
   publicados na precisão de uma casa decimal;
 - `tests/test_ftha.py`: regressão e validação da interface do modelo.
@@ -865,9 +873,15 @@ uv run python -m src.article_validation
 uv run python -m src.base_case_analysis
 uv run python -m src.sensitivity_analysis
 uv run python -m src.multiobjective_optimization
-uv run python -m src.nsga3_sensitivity_analysis
+uv run python -m src.nsga3_sensitivity_analysis --workers 8
 uv run python -c "from src.FTHA import objective_function; print(objective_function([4500, -48, 12, 4]))"
 ```
+
+As duas baterias estocásticas retomam checkpoints compatíveis automaticamente.
+Use `--no-resume` somente para ignorar um checkpoint existente. O benchmark
+também aceita `--runs`, `--population-size`, `--generations`, `--base-seed`,
+`--workers` e `--algorithms`; alterar população ou gerações deixa de reproduzir
+o orçamento-base documentado.
 
 ## Referências
 
