@@ -467,24 +467,27 @@ fatorial de 3.000 pontos. Escala positiva não altera dominância de Pareto.
 
 Foram comparados quatro métodos com 48 candidatos e 100 gerações completas
 após a população inicial: **4.848 avaliações exatas por execução**. Em dois
-objetivos, 47 partições produzem 48 pontos uniformes do NSGA-III; a população
-coincide com essas direções e é múltipla de quatro para o torneio DCD do
-NSGA-II. As 100 gerações estão no intervalo de 80–120 ciclos examinado no
-[MOPSO original](https://doi.org/10.1109/CEC.2002.1004388) e ampliam a
-profundidade da busca para quatro decisões. Esse orçamento comum controla o
-esforço da comparação, mas não demonstra, isoladamente, convergência.
+objetivos, as direções do NSGA-III pertencem ao segmento $w_1+w_2=1$; 47
+intervalos iguais produzem 48 pontos, incluindo os extremos. A população
+coincide com essas direções. Seu tamanho também é múltiplo de quatro, requisito
+da implementação do torneio DCD (*dominance and crowding distance*) usada no
+NSGA-II: a dominância decide quando possível e, sem dominância, favorece-se a
+maior distância de aglomeração. Uma avaliação é uma simulação do vetor
+$[N,\theta,r,L/R]$ com o cálculo dos dois objetivos. O mesmo número de
+avaliações controla o acesso ao modelo, mas não demonstra convergência nem
+implica tempos de processamento iguais.
 
 Cada método é executado 21 vezes com sementes independentes, totalizando 84
 execuções e 407.232 chamadas do FTHA. Vinte e uma repetições superam as 20 do
 estudo original do NSGA-III, permitem que a mediana corresponda a uma execução
-observada e mantêm o custo viável; são um compromisso de orçamento, não uma
-garantia universal de poder estatístico.
+observada e mantêm o custo viável; são um compromisso entre robustez estatística
+e custo computacional, não uma garantia universal de poder estatístico.
 
 | Método | Implementação e escolhas |
 |---|---|
-| NSGA-II | [DEAP `selNSGA2`](https://deap.readthedocs.io/en/master/api/tools.html#deap.tools.selNSGA2), torneio DCD e elitismo. SBX usa $p_c=0{,}9$ e $\eta_c=20$; mutação polinomial usa $\eta_m=20$ e $p_m=1/n_{var}=0{,}25$ por variável. Esses valores são uma referência consolidada para variáveis reais no [NSGA-II de Deb et al.](https://doi.org/10.1109/4235.996017): cruzamento frequente e perturbações majoritariamente locais, com uma coordenada mutada em média. |
+| NSGA-II | [DEAP `selNSGA2`](https://deap.readthedocs.io/en/master/api/tools.html#deap.tools.selNSGA2), torneio DCD e elitismo. SBX usa $p_c=0{,}9$ e $\eta_c=20$; mutação polinomial usa $\eta_m=20$ e $p_m=1/n_{var}=0{,}25$ por variável. No vetor com quatro decisões, cada variável pode ser alterada independentemente: o valor esperado é $4\times0{,}25=1$ variável por descendente, embora possam mudar de zero a quatro. O índice $\eta_m=20$ favorece perturbações pequenas sem excluir mudanças maiores, conforme a referência para variáveis reais no [NSGA-II de Deb et al.](https://doi.org/10.1109/4235.996017). |
 | NSGA-III | [DEAP `selNSGA3`](https://deap.readthedocs.io/en/stable/examples/nsga3.html), os mesmos operadores e 48 pontos de referência ($p=47$). Compartilhar os operadores isola o efeito da seleção; não se afirma que seja a configuração original exata de [Deb e Jain](https://doi.org/10.1109/TEVC.2013.2281535). |
-| MOPSO adaptado | Implementação local em NumPy com 48 partículas, $\omega=0{,}4$ e $c_1=c_2=1$, conforme [Coello Coello e Lechuga](https://doi.org/10.1109/CEC.2002.1004388). O arquivo externo $4N=192$ aproxima o repositório de 200 soluções; líderes são favorecidos por distância de aglomeração. Em cada partícula sorteada, a adaptação perturba uma coordenada com desvio 0,10 no espaço normalizado e probabilidade reduzida linearmente a partir de 0,10 ao longo das gerações. |
+| MOPSO adaptado | Implementação local em NumPy com 48 partículas, $\omega=0{,}4$ e $c_1=c_2=1$, conforme [Coello Coello e Lechuga](https://doi.org/10.1109/CEC.2002.1004388). O arquivo externo $4N=192$ aproxima o repositório de 200 soluções; líderes são favorecidos por distância de aglomeração. Em cada partícula sorteada, a adaptação perturba uma variável de decisão com desvio 0,10 no espaço normalizado e probabilidade reduzida linearmente a partir de 0,10 ao longo das gerações. |
 | MOEA/D | [`MOEAD` do pymoo](https://pymoo.org/algorithms/moo/moead.html), 48 direções, Tchebycheff, 10 vizinhos e probabilidade 0,9 de acasalamento local. Dez vizinhos mantêm aproximadamente os 20% usados com população 100 no [trabalho original](https://doi.org/10.1109/TEVC.2007.892759); 0,9 prioriza cooperação local e reserva 10% para interações globais. |
 
 As versões, sementes e todos os hiperparâmetros estão registrados de forma
@@ -492,7 +495,7 @@ legível por máquina em
 [`reports/multiobjective_configuration.csv`](reports/multiobjective_configuration.csv).
 
 Uma avaliação que não conclua a iteração politrópica dentro da tolerância
-continua contando no orçamento e recebe objetivos escalonados $(0,0)$. Como toda
+continua incluída na contagem e recebe objetivos escalonados $(0,0)$. Como toda
 solução física útil tem ambos os objetivos de minimização negativos, essa
 penalização é dominada e não entra na frente final.
 
@@ -543,7 +546,7 @@ não atingiu significância estatística a 5%
 NSGA-III obteve $HV_{48}$ significativamente maior que o MOEA/D
 ($p_{\mathrm{Holm}}=4,24\times10^{-6}$;
 $\delta_{\mathrm{Cliff}}=0,882$). Essas conclusões se restringem ao indicador,
-ao problema, às configurações e ao orçamento estudados.
+ao problema, às configurações e ao número de avaliações estudados.
 
 As métricas brutas preservadas nos relatórios também descrevem a saída completa
 dos métodos. Nelas, o arquivo de até 192 pontos do MOPSO adaptado resulta em

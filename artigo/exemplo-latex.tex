@@ -113,87 +113,110 @@ NSGA-III, Multiobjective Optimization, Otto Engine.
 \section{Introdução}
 
 Modelos termodinâmicos permitem investigar como parâmetros operacionais e
-construtivos afetam o desempenho de motores de combustão interna. No ciclo Otto
-ideal, a adição de calor é instantânea e ocorre a volume constante. O modelo de
-adição finita de calor de \citet{naaktgeboren2017} substitui essa hipótese por
-uma liberação distribuída ao longo do ângulo do virabrequim, representando a
-interação entre combustão e movimento do pistão. Trata-se ainda de um modelo
-ar-padrão, porém mais adequado ao estudo da influência do instante de ignição e
-da duração da combustão do que o ciclo ideal \citep{curto2008}.
+construtivos afetam o desempenho de motores de combustão interna
+\citep{heywood2018}. No ciclo Otto ideal, a adição de calor é instantânea e
+ocorre a volume constante. Modelos com adição finita de calor substituem essa
+hipótese por uma liberação distribuída ao longo do ângulo do virabrequim e,
+assim, representam a interação entre combustão e movimento do pistão
+\citep{naaktgeboren2017}.
 
-O estudo original emprega variações paramétricas individuais. Essa estratégia
-não explora de forma sistemática as interações entre rotação, instante de
-ignição e geometria. Em particular, a taxa de compressão altera o volume de
-folga e os estados da compressão e expansão \citep{pulkrabek2004}, enquanto a
-razão entre comprimento da biela e raio da manivela, $L/R$, modifica a
-trajetória do pistão próxima ao ponto morto superior \citep{suzuki2006rod}.
-Logo, decisões operacionais e construtivas podem afetar simultaneamente a
-eficiência térmica e a potência líquida específica.
+O estudo conjunto desses parâmetros é necessário porque rotação, instante de
+ignição e geometria interagem e afetam simultaneamente a eficiência térmica e a
+potência líquida específica. Variações paramétricas individuais não identificam
+adequadamente esse compromisso: aumentar a frequência dos ciclos pode elevar a
+potência, mas também deslocar a liberação de calor de condições favoráveis à
+eficiência.
+
+Em otimização multiobjetivo, o conflito é representado por uma fronteira de
+soluções não dominadas, em vez de um único ótimo. O NSGA-III utiliza direções de
+referência para distribuir soluções nessa fronteira e foi concebido
+principalmente para problemas com muitos objetivos \citep{deb2014nsga3}. Sua
+aplicação a um problema biobjetivo de máquina térmica deve, portanto, ser
+avaliada frente a mecanismos alternativos de busca e preservação de
+diversidade.
+
+Este trabalho aplica o NSGA-III à maximização simultânea da eficiência térmica e
+da potência líquida específica de um modelo Otto com adição finita de calor.
+São otimizadas quatro decisões contínuas: rotação, instante de ignição, taxa de
+compressão e razão biela--manivela. As contribuições são a formulação
+multiobjetivo do problema térmico, a comparação direta com NSGA-II, MOPSO
+adaptado e MOEA/D sob o mesmo número de avaliações do modelo e a interpretação
+dos compromissos físicos encontrados.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-Em otimização multiobjetivo, soluções são comparadas por dominância de Pareto:
-uma solução domina outra quando não é pior em nenhum objetivo e é estritamente
-melhor em pelo menos um. Quando os objetivos são conflitantes, busca-se uma
-aproximação diversificada da fronteira de soluções não dominadas, em vez de um
-único ótimo \citep{deb2011,hua2021survey}. Essa perspectiva é apropriada ao
-problema eficiência--potência, pois maior frequência de ciclos pode elevar a
-potência e, ao mesmo tempo, deslocar a liberação de calor de condições
-favoráveis à eficiência.
+\section{Revisão da Literatura}\label{sec:revisao}
 
-O algoritmo genético de ordenação por não dominância III (NSGA-III) emprega
-pontos de referência para preservar a diversidade durante a seleção ambiental
-\citep{deb2014nsga3}. Embora tenha sido proposto para problemas com muitos
-objetivos, sua adequação ao presente problema biobjetivo deve ser estabelecida
-empiricamente. Por isso, seu desempenho é comparado ao NSGA-II, a segunda
-geração do algoritmo e baseada em distância de aglomeração \citep{deb2002}; ao
-MOPSO adaptado, uma otimização multiobjetivo por enxame de partículas com
-repositório externo de soluções não dominadas \citep{coello2004mopso}; e ao
-algoritmo evolutivo multiobjetivo baseado em decomposição (MOEA/D), que cria
-subproblemas escalares associados a diferentes direções
-\citep{zhang2007moead}. Esses mecanismos constituem referências complementares
-de busca e preservação de diversidade.
+Os fundamentos de motores de combustão interna e do ciclo Otto são discutidos
+por \citet{heywood2018} e \citet{pulkrabek2004}. \citet{curto2008} compararam
+modelos teóricos e simulados de um ciclo Otto irreversível. Para representar a
+duração da combustão, \citet{naaktgeboren2017} formulou a adição finita de
+calor em função do ângulo do virabrequim. \citet{he2021} estudaram relações
+entre trabalho e eficiência em ciclos de potência a gás. Quanto às decisões construtivas,
+\citet{suzuki2006rod} analisaram o efeito da razão biela--manivela sobre a
+eficiência, e \citet{shah2022producer} investigaram parâmetros geométricos e
+operacionais por modelagem termodinâmica. Esses trabalhos evidenciam a
+relevância das variáveis adotadas, mas tratam predominantemente seus efeitos de
+forma paramétrica ou em formulações distintas da considerada aqui.
 
-\citet{he2021} analisaram o compromisso entre eficiência e trabalho específico
-no ciclo Otto ideal, mas não a otimização conjunta de parâmetros operacionais e
-construtivos no modelo com adição finita de calor. Assim, este trabalho aplica
-o NSGA-III à maximização simultânea da eficiência térmica e da potência líquida
-específica por meio de quatro decisões contínuas: rotação, instante de ignição,
-taxa de compressão e razão biela--manivela. As contribuições são a formulação
-multiobjetivo do caso térmico, a comparação direta com NSGA-II, MOPSO adaptado
-e MOEA/D sob o mesmo orçamento de avaliações e a análise dos compromissos
-físicos obtidos pelos algoritmos.
+Em otimização multiobjetivo, uma solução domina outra quando não é pior em
+nenhum objetivo e é estritamente melhor em pelo menos um; havendo conflito,
+busca-se uma aproximação diversificada da fronteira não dominada
+\citep{deb2011}. Entre os algoritmos evolutivos, o NSGA-II combina ordenação por
+não dominância, elitismo e distância de aglomeração \citep{deb2002}. O NSGA-III
+substitui a preservação de diversidade baseada apenas em aglomeração por um
+mecanismo associado a direções de referência \citep{deb2014nsga3}. Como
+paradigmas complementares, o MOPSO mantém um arquivo externo de soluções não
+dominadas e seleciona líderes para conduzir o enxame
+\citep{coello2002mopso,coello2004mopso}, enquanto o MOEA/D decompõe o problema
+em subproblemas escalares vinculados a diferentes direções
+\citep{zhang2007moead}. Revisões recentes destacam que a geometria da fronteira
+e o mecanismo de diversidade influenciam o desempenho relativo dos métodos
+\citep{hua2021survey}.
+
+Entre os estudos examinados, não se identificou uma comparação direta desses
+quatro mecanismos na otimização conjunta de parâmetros operacionais e
+construtivos do modelo Otto com adição finita de calor. O presente estudo
+aborda essa lacuna mediante domínio, funções objetivo e número de avaliações
+do modelo comuns, além de repetições independentes e análise estatística do
+indicador de desempenho.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Materiais e Métodos}\label{sec:metodos}
 
-O procedimento compreendeu a verificação do modelo termodinâmico, a formulação
-do problema e a comparação do NSGA-III com três algoritmos multiobjetivo. O
-NSGA-III é a abordagem principal do estudo, sem pressuposição de superioridade.
+O procedimento foi organizado em três etapas: formulação e verificação do
+problema, configuração dos algoritmos e definição do protocolo de análise. O
+NSGA-III é a abordagem principal, sem pressuposição de superioridade.
 
-\subsection{Modelo termodinâmico e verificação numérica}
-\label{subsec:modelo-termodinamico}
+\subsection{Problema de otimização}
+\label{subsec:problema}
 
-Adotou-se o modelo ar-padrão de adição finita de calor de
-\citet{naaktgeboren2017}, representado como sistema fechado, com gás ideal,
-processos internamente reversíveis e sem perdas por atrito, vazamento ou queda
-de pressão. A geometria instantânea é calculada pelo mecanismo
-biela--manivela. A denominação ar-padrão caracteriza as hipóteses idealizadas
-do ciclo; no caso analisado, as propriedades termofísicas são as do CO$_2$,
-conforme uma das configurações do estudo de referência. Denotando por $T$ a temperatura absoluta, $c_p(T)$ e $c_v(T)$
-os calores específicos a pressão e a volume constantes, respectivamente,
-$R_g$ a constante específica do gás e $u(T)$ a energia interna específica,
-adotam-se
+Adotou-se a estrutura de adição finita de calor de
+\citet{naaktgeboren2017}. O ciclo é idealizado como sistema fechado, com gás
+ideal, processos internamente reversíveis e sem perdas por atrito, vazamento ou
+queda de pressão. A geometria instantânea é calculada pelo mecanismo
+biela--manivela. Embora o estudo de referência empregue a denominação
+ar-padrão para as hipóteses do ciclo, uma de suas configurações calcula as
+propriedades termofísicas do CO$_2$; essa é a configuração adotada aqui.
+
+Denotando por $T$ a temperatura absoluta, $c_p(T)$ e $c_v(T)$ os calores
+específicos a pressão e a volume constantes, $R_g$ a constante específica do
+gás e $u(T)$ a energia interna específica, adotam-se
 \begin{equation}
-c_v(T)=c_p(T)-R_g,
-\qquad
-u(T)=\int c_v(T)\,dT.
+\begin{aligned}
+c_p(T)&=\frac{a+bT+cT^2+dT^3}{M},&
+c_v(T)&=c_p(T)-R_g,\\
+u(T)&=\int c_v(T)\,dT.
+\end{aligned}
 \label{eq:propriedades-gas}
 \end{equation}
-Adotou-se uma correlação cúbica para $c_p(T)$ do CO$_2$. O estudo de referência
-emprega uma correlação termofísica de quinta ordem; a verificação considera,
-portanto, a resposta na resolução publicada, e não a identidade do submodelo de
-propriedades. Os calores específicos e $R_g$ são expressos em
-kJ/(kg\,K), enquanto $u$ é expresso em kJ/kg.
+Na correlação cúbica empregada para o CO$_2$, $M=44{,}0098$ kg/kmol e
+$a=23{,}965$, $b=5{,}4685\times10^{-2}$,
+$c=-3{,}0227\times10^{-5}$ e $d=6{,}0233\times10^{-9}$, com unidades
+consistentes para que o numerador forneça o calor específico molar em
+kJ/(kmol\,K); a divisão por $M$ fornece $c_p$ em kJ/(kg\,K). O estudo de
+referência usa uma correlação termofísica de quinta ordem; a verificação
+realizada é, portanto, parcial e restrita à resolução dos resultados
+publicados, não à identidade do submodelo de propriedades.
 
 A fração acumulada de calor liberado é
 \begin{equation}
@@ -270,10 +293,7 @@ $0{,}5^\circ$ durante esse processo. Como as eficiências de referência têm tr
 algarismos significativos (uma casa decimal), definiu-se concordância pela
 igualdade após arredondamento à resolução publicada de 0,1 ponto percentual.
 
-\subsection{Caso de estudo e formulação multiobjetivo}
-\label{subsec:formulacao-problema}
-
-Para o caso de estudo, definiu-se $\Delta t_c=2{,}5$ ms. A duração angular
+Para o caso de otimização, definiu-se $\Delta t_c=2{,}5$ ms. A duração angular
 passa a depender da rotação,
 \begin{equation}
 \delta=\omega\Delta t_c,\qquad
@@ -283,11 +303,7 @@ passa a depender da rotação,
 \label{eq:duracao-angular}
 \end{equation}
 com $N$ em rpm e $\Delta t_c$ em segundos. O caso de referência usa
-$N=4\,800$ rpm e $\theta=-15^\circ$, portanto $\delta=72^\circ$. Antes da
-otimização, uma varredura fatorial diagnóstica avaliou 3\,000 combinações:
-20 rotações, seis instantes de ignição, cinco taxas de compressão e cinco
-razões biela--manivela. Essa malha não substitui a busca contínua; ela verifica
-o domínio, caracteriza o conflito e define escalas fixas para os objetivos.
+$N=4\,800$ rpm e $\theta=-15^\circ$, portanto $\delta=72^\circ$.
 
 As quatro decisões da otimização são contínuas:
 \begin{equation}
@@ -336,7 +352,8 @@ f_2(\mathbf{x})=-\frac{\dot w_{\mathrm{liq}}(\mathbf{x})}{27\,000}.
 \label{eq:objetivos-computacionais}
 \end{equation}
 As escalas 40\% e 27\,000 kW/kg são limites arredondados acima dos máximos da
-varredura. Essa transformação monotônica não altera a dominância de Pareto.
+varredura diagnóstica descrita na Seção~\ref{subsec:procedimentos}. Essa
+transformação monotônica não altera a dominância de Pareto.
 Os parâmetros constantes são apresentados na Tabela~\ref{tab:parametros-constantes}.
 
 \begin{table}[htbp]
@@ -359,65 +376,49 @@ Malha fora/durante a adição & -- & 90 intervalos / 0,5$^\circ$ \\
 \end{tabular}
 \end{table}
 
-\subsection{NSGA-III e desenho experimental}
+\subsection{Algoritmos utilizados}
 \label{subsec:algoritmos}
 
-O NSGA-III foi implementado no DEAP 1.4.4 \citep{fortin2012deap}. Para dois
-objetivos, $p=47$ divisões geram
-$H=\binom{2+47-1}{47}=48$ pontos de referência uniformes
-\citep{deb2014nsga3}; adotou-se, portanto, uma população de 48 indivíduos,
-coincidente com o número de direções. Esse tamanho também é múltiplo de quatro,
-como requerido pelo torneio baseado em dominância e distância de aglomeração
-(DCD) empregado no NSGA-II. Foram executadas 100 gerações completas após a
-população inicial, totalizando
-\begin{equation}
-N_{\mathrm{aval}}=48(100+1)=4\,848
-\label{eq:orcamento-algoritmos}
-\end{equation}
-avaliações por execução. As 100 gerações pertencem ao intervalo de 80 a 120
-ciclos empregado nos experimentos do MOPSO original
-\citep{coello2002mopso} e definem profundidade comum para as quatro decisões.
+O NSGA-III ordena a população combinada em frentes não dominadas. Se a última
+frente necessária excede as vagas disponíveis, os objetivos são normalizados,
+cada solução é associada à direção de referência mais próxima e um procedimento
+de nichos favorece direções ainda pouco representadas \citep{deb2014nsga3}.
+Assim, as referências orientam a diversidade da seleção ambiental. No caso
+biobjetivo, elas pertencem ao segmento $w_1+w_2=1$: sua divisão em 47
+intervalos iguais produz 48 pontos, incluindo os dois extremos. Adotaram-se,
+portanto, 48 indivíduos e 48 direções de referência.
+
+O NSGA-II também usa ordenação por não dominância, mas preserva diversidade
+pela distância de aglomeração \citep{deb2002}. Na seleção de reprodutores,
+empregou-se o torneio DCD (do inglês \textit{dominance and crowding distance}):
+se um candidato domina o outro, ele é selecionado; na ausência de dominância,
+favorece-se aquele com maior distância de aglomeração. O tamanho 48 é múltiplo
+de quatro, requisito da implementação desse torneio usada no DEAP
+\citep{fortin2012deap}, e não uma propriedade geral do NSGA-II.
 
 Nos métodos evolutivos, o cruzamento binário simulado (SBX) usa $p_c=0{,}9$ e
-$\eta_c=20$, e a mutação polinomial usa $\eta_m=20$. Esses valores constituem
-uma referência consolidada para variáveis reais no NSGA-II \citep{deb2002}: a
-alta probabilidade favorece recombinação, e os índices 20 concentram
-descendentes próximos aos pais sem impedir perturbações mais amplas. Como há
-quatro decisões, o operador é chamado em todo descendente com probabilidade
-interna
-$p_m=1/n_{\mathrm{var}}=0{,}25$ por coordenada, resultando em uma coordenada
-mutada em média. NSGA-II, NSGA-III e MOEA/D empregam as mesmas famílias de
-operadores e os mesmos parâmetros nominais como controle experimental, embora
-DEAP e pymoo possuam implementações próprias.
+$\eta_c=20$, e a mutação polinomial usa $\eta_m=20$. Esses parâmetros são
+referências consolidadas para variáveis reais no NSGA-II \citep{deb2002}.
+No vetor $\mathbf{x}=[N,\theta,r,L/R]$, cada uma das quatro variáveis de
+decisão é submetida independentemente à mutação com
+$p_m=1/n_{\mathrm{var}}=0{,}25$. O número esperado de variáveis modificadas em
+um descendente é, portanto, $4\times0{,}25=1$, embora uma aplicação possa
+alterar de zero a quatro variáveis. O índice $\eta_m=20$ favorece perturbações
+pequenas, sem excluir mudanças maiores. NSGA-II, NSGA-III e MOEA/D empregam as
+mesmas famílias de operadores e os mesmos parâmetros nominais como controle
+experimental, embora as bibliotecas possuam implementações próprias.
 
-Para contextualizar seu desempenho, NSGA-II, MOPSO e MOEA/D foram empregados
-como algoritmos de referência sob o mesmo domínio, funções objetivo e orçamento.
-O NSGA-III e cada algoritmo de referência foram executados 21 vezes, perfazendo
-84 execuções e 407\,232 chamadas diretas do modelo, sem metamodelo ou
-interpolação. As 21 repetições superam as 20 usadas no estudo original do
-NSGA-III \citep{deb2014nsga3}, fornecem mediana correspondente a uma execução
-observada e mantêm viável o custo computacional; constituem compromisso de
-orçamento, não garantia universal de poder estatístico. As sementes foram
-determinísticas, distintas entre algoritmos e repetições; portanto, a comparação
-é independente e não pareada. A ordem dos métodos foi alternada entre
-repetições para reduzir viés temporal.
-
-Em todos os experimentos, eventual ponto em que a iteração politrópica não
-convergisse dentro da tolerância recebeu desempenho nulo nos dois objetivos.
-Como os objetivos computacionais são negativos para toda solução física útil,
-esse ponto fica dominado, mas sua chamada permanece contabilizada no orçamento.
-
-O NSGA-II foi implementado no DEAP com torneio DCD, ordenação por dominância e
-distância de aglomeração \citep{deb2002}. O MOPSO segue a atualização e o
-repositório externo de \citet{coello2002mopso,coello2004mopso}; a adaptação
-empregada seleciona líderes favorecidos pela distância de aglomeração e, em
-cada partícula sorteada, perturba uma coordenada com ruído gaussiano de
-desvio-padrão 0,10 no espaço normalizado. A probabilidade dessa perturbação
-decresce linearmente a partir de 0,10 ao longo das gerações. O método é, por
-isso, denominado MOPSO adaptado. O MOEA/D foi executado no pymoo 0.6.2
-\citep{blank2020}, com decomposição de Tchebycheff
-\citep{zhang2007moead,li2014aosmoead}. A Tabela~\ref{tab:configuracao-algoritmos}
-sintetiza as configurações.
+O MOPSO segue a atualização e o arquivo externo de soluções não dominadas de
+\citet{coello2002mopso,coello2004mopso}. Na adaptação utilizada, líderes com
+maior distância de aglomeração têm maior probabilidade de seleção. Cada
+partícula sorteada tem uma variável de decisão perturbada por ruído gaussiano
+com desvio-padrão 0,10 no espaço normalizado; a probabilidade do sorteio decresce
+linearmente a partir de 0,10. O MOEA/D, por sua vez, associa soluções a
+subproblemas definidos por direções e emprega decomposição de Tchebycheff
+\citep{zhang2007moead}. NSGA-II, NSGA-III e MOPSO foram implementados no DEAP
+1.4.4 \citep{fortin2012deap}, e o MOEA/D no pymoo 0.6.2
+\citep{blank2020}. A Tabela~\ref{tab:configuracao-algoritmos} sintetiza as
+configurações.
 
 \begin{table}[htbp]
 \centering
@@ -443,28 +444,59 @@ acasalamento na vizinhança 0,9; SBX e mutação com parâmetros nominais comuns
 \end{tabular}
 \end{table}
 
-\subsection{Métricas e solução de compromisso}
-\label{subsec:metricas}
+\subsection{Procedimentos de análise}
+\label{subsec:procedimentos}
 
-O indicador principal é o hipervolume da frente final no espaço escalonado de
-minimização, com referência $\mathbf{r}=(0,0)$ \citep{zitzler1999}. Para evitar
-vantagem decorrente apenas da cardinalidade, limitou-se cada frente a no máximo
-48 soluções antes do cálculo, definindo-se $HV_{48}$. Quando necessário,
-removeram-se iterativamente pontos de menor distância de aglomeração,
-preservando-se os extremos; empates foram resolvidos por regra lexicográfica
-determinística. Reportam-se média, desvio-padrão, mediana e
-intervalo interquartil das 21 execuções. As distribuições foram comparadas pelo
-teste de Kruskal--Wallis \citep{kruskal1952} e, nos seis pares, pelo teste
-bilateral de Mann--Whitney \citep{mannwhitney1947}, com correção de Holm
-\citep{holm1979} e delta de Cliff \citep{cliff1993}, a 5\% de significância.
-Para $\delta_{\mathrm{Cliff}}$, o sinal positivo indica que o primeiro método
+Antes da busca contínua, uma varredura fatorial diagnóstica avaliou 3\,000
+combinações: 20 rotações, seis instantes de ignição, cinco taxas de compressão
+e cinco razões biela--manivela. Essa malha foi usada para verificar o domínio,
+caracterizar o conflito e definir escalas fixas para os objetivos, sem
+substituir a otimização.
+
+Para garantir comparação sob esforço de avaliação comum, os vetores iniciais
+foram amostrados uniformemente em $[0,1]^4$, e o critério de parada foi fixado
+em 100 etapas iterativas após a população inicial. Uma avaliação corresponde a
+uma simulação do vetor candidato $[N,\theta,r,L/R]$, da qual se calculam os dois
+objetivos. A população inicial e as 100 etapas seguintes, todas com 48
+candidatos, totalizaram 4\,848 avaliações do modelo termodinâmico por execução.
+Cada método foi executado 21 vezes; as 84 execuções perfizeram 407\,232
+avaliações, sem metamodelo ou interpolação. Igualar esse número padroniza o
+acesso dos algoritmos ao modelo, mas não implica tempos de processamento
+iguais.
+
+As 21 repetições independentes caracterizam a variabilidade estocástica e
+permitem que a mediana corresponda a uma execução observada; constituem um
+compromisso entre robustez estatística e custo computacional, não garantia
+universal de poder estatístico. As sementes foram determinísticas e distintas
+entre algoritmos e repetições, de modo que as comparações são não pareadas.
+Quando a iteração politrópica não convergia dentro da tolerância, o candidato
+recebia desempenho nulo nos dois objetivos. Como toda solução física útil tem
+objetivos computacionais negativos, esse ponto ficava dominado, mas a avaliação
+continuava contabilizada.
+
+O indicador principal é o hipervolume, pois sintetiza convergência e extensão
+da frente aproximada em relação a uma referência comum \citep{zitzler1999}.
+Calculou-se o indicador no espaço escalonado de minimização, com
+$\mathbf{r}=(0,0)$. Como o arquivo do MOPSO comporta até 192 soluções, a
+cardinalidade poderia favorecer esse método. Por isso, antes do cálculo,
+aplicou-se a mesma regra às frentes dos quatro algoritmos: no máximo 48
+soluções, definindo-se $HV_{48}$. Quando necessário, removeram-se
+iterativamente pontos de menor distância de aglomeração, preservando os
+extremos; empates foram resolvidos por regra lexicográfica determinística.
+
+Reportam-se média, desvio-padrão, mediana e intervalo interquartil das 21
+execuções. As distribuições foram comparadas pelo teste de Kruskal--Wallis
+\citep{kruskal1952} e, nos seis pares, pelo teste bilateral de Mann--Whitney
+\citep{mannwhitney1947}, com correção de Holm \citep{holm1979} e delta de Cliff
+\citep{cliff1993}, a 5\% de significância. Para
+$\delta_{\mathrm{Cliff}}$, o sinal positivo indica que o primeiro método
 nomeado tende a produzir valores maiores de $HV_{48}$.
 
-Para comparar a região física alcançada pelos métodos, cada frente limitada a
-no máximo 48 soluções foi representada por um compromisso de pesos iguais.
-Calcularam-se
-os pontos ideal $\mathbf{z}^\ast$ e nadir $\mathbf{z}^{\mathrm{nad}}$ da união
-não dominada das 84 execuções. Selecionou-se a menor distância
+Para interpretar a região física, selecionou-se um ponto de compromisso em
+cada frente limitada a 48 soluções e resumiram-se os 21 pontos de cada
+algoritmo. Calcularam-se os pontos ideal $\mathbf{z}^\ast$ e nadir
+$\mathbf{z}^{\mathrm{nad}}$ da união não dominada dessas frentes e
+selecionou-se a menor distância
 \begin{equation}
 d(\mathbf{x})=
 \sqrt{\frac{1}{2}\sum_{m=1}^{2}
@@ -474,11 +506,13 @@ d(\mathbf{x})=
 \right]^2}.
 \label{eq:compromisso}
 \end{equation}
+Os pesos iguais servem apenas à interpretação física das soluções e não à
+ordenação do desempenho dos algoritmos, baseada em $HV_{48}$.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-\section{Resultados}\label{sec:resultados}
+\section{Resultados e Discussão}\label{sec:resultados}
 
-\subsection{Verificação e análise paramétrica}
+\subsection{Verificação e caracterização do problema}
 
 As eficiências calculadas para
 $\delta\in\{10^\circ,30^\circ,50^\circ,70^\circ,90^\circ,110^\circ\}$
@@ -495,23 +529,32 @@ ignição distintos. O conflito observado justifica a busca contínua da frontei
 de Pareto e sustenta as escalas de 40\% e 27\,000 kW/kg adotadas para os
 objetivos.
 
-\subsection{Comparação com os algoritmos de referência}
+\subsection{Desempenho comparativo dos algoritmos}
 
 O NSGA-III, configurado conforme a Tabela~\ref{tab:configuracao-algoritmos}, foi
 avaliado frente aos três algoritmos de referência. As 84 execuções concluíram
 as 407\,232 avaliações previstas. A comparação global
 de $HV_{48}$ indicou diferenças entre os métodos
 ($H(3)=61{,}094$; $p=3{,}43\times10^{-13}$). O NSGA-II apresentou média
-0,116\% superior à do NSGA-III, com forte separação ordinal entre as
-distribuições ($p_{\mathrm{Holm}}=4{,}24\times10^{-6}$;
-$\delta_{\mathrm{Cliff}}=0{,}882$). Assim, a diferença relativa é pequena na
-escala do indicador, mas consistente em razão de sua baixa dispersão. Entre
-NSGA-III e MOPSO adaptado, a diferença não atingiu significância estatística
+0,116\% superior à do NSGA-III
+($p_{\mathrm{Holm}}=4{,}24\times10^{-6}$;
+$\delta_{\mathrm{Cliff}}=0{,}882$). A diferença relativa é pequena na escala
+do indicador, mas a ordenação entre as amostras foi consistente. Entre
+NSGA-III e MOPSO adaptado, não se rejeitou a hipótese de distribuições iguais
 após a correção de Holm ($p_{\mathrm{Holm}}=0{,}0592$;
-$\delta_{\mathrm{Cliff}}=0{,}342$). O NSGA-III obteve $HV_{48}$
-significativamente maior que o MOEA/D
+$\delta_{\mathrm{Cliff}}=0{,}342$); esse resultado não demonstra equivalência
+entre os métodos. O NSGA-III obteve $HV_{48}$ significativamente maior que o
+MOEA/D
 ($p_{\mathrm{Holm}}=4{,}24\times10^{-6}$;
 $\delta_{\mathrm{Cliff}}=0{,}882$).
+
+Nesse problema biobjetivo, a associação às direções de referência produziu
+frentes competitivas, mas não superou a seleção por distância de aglomeração
+do NSGA-II. Uma interpretação possível é que as 48 referências ocupam apenas o
+segmento unidimensional entre dois objetivos, enquanto a principal motivação
+do NSGA-III é preservar diversidade quando o número de objetivos torna a
+seleção mais difícil. Os resultados não permitem generalizar essa comparação
+para outros domínios ou para formulações com mais objetivos.
 
 \begin{table}[htbp]
 \centering
@@ -540,12 +583,13 @@ quartis, respectivamente.
 
 A Figura~\ref{fig:pareto-algoritmos} apresenta uma execução representativa de
 cada método após a limitação a no máximo 48 soluções. Todas as aproximações
-recuperaram o conflito esperado:
-a eficiência máxima da união foi 38,434\% em 500,0 rpm,
+mostradas recuperaram o conflito esperado. Separadamente, considerando a união
+das frentes das 84 execuções, a eficiência máxima foi 38,434\% em 500,0 rpm,
 $\theta=-3{,}652^\circ$, $r=12{,}0000$ e $L/R=4{,}3730$, com
 1\,601,5 kW/kg, ao passo que a potência máxima foi 25\,583,0 kW/kg em
 10\,000,0 rpm, $\theta=-70{,}912^\circ$, $r=12{,}0000$ e
-$L/R=4{,}4000$, com eficiência de 30,700\%.
+$L/R=4{,}4000$, com eficiência de 30,700\%. Esses extremos globais não
+correspondem necessariamente às quatro execuções representativas da figura.
 
 \begin{figure}[htbp]
 \centering
@@ -554,6 +598,8 @@ $L/R=4{,}4000$, com eficiência de 30,700\%.
 método. Traços e marcadores permitem impressão em preto e branco.}
 \label{fig:pareto-algoritmos}
 \end{figure}
+
+\subsection{Interpretação física e limitações}
 
 Os compromissos de pesos iguais também ocuparam regiões semelhantes. Ao
 considerar, para cada método, a média das 21 repetições, $N$ variou de 5\,166 a
@@ -565,12 +611,10 @@ entre 11,9869 e 11,9998, próxima do limite superior, e $L/R$ entre 4,167 e
 ocorre principalmente entre rotação e instante de ignição; não constitui
 recomendação direta de projeto.
 
-\subsection{Limitações de interpretação}
-
-Os limites e os ótimos devem ser interpretados dentro do modelo ar-padrão com
+Os limites e os ótimos devem ser interpretados dentro do modelo idealizado com
 adição finita de calor. A formulação representa gás ideal, sistema fechado,
-processos internamente
-reversíveis e adição finita de calor, mas não inclui detonação, cinética da
+processos internamente reversíveis e adição finita de calor, mas não inclui
+detonação, cinética da
 mistura, transferência de calor às paredes, atrito, bombeamento, vazamento,
 enchimento, limites de pressão, tensões mecânicas ou emissões. A ausência de
 detonação e restrições mecânicas pode conduzir $r$ ao limite superior; isso
@@ -589,12 +633,12 @@ potência líquida específica do modelo Otto com adição finita de calor,
 empregando NSGA-II, MOPSO adaptado e MOEA/D como referências. Sob 4\,848
 avaliações por execução e cardinalidade máxima comum de 48 soluções, o NSGA-II
 apresentou $HV_{48}$ 0,116\% maior que o NSGA-III, diferença estatisticamente
-significativa apesar da pequena magnitude relativa. Não se detectou diferença
-estatisticamente significativa em $HV_{48}$ entre NSGA-III e MOPSO adaptado a
-5\%, enquanto o NSGA-III obteve $HV_{48}$ significativamente maior que o
-MOEA/D. Portanto, para o problema, as configurações e o orçamento estudados, a
-seleção por pontos de referência mostrou-se competitiva, mas não ofereceu
-vantagem sobre o NSGA-II.
+significativa apesar da pequena magnitude relativa. Entre NSGA-III e MOPSO
+adaptado, a hipótese de distribuições iguais não foi rejeitada a 5\%, sem que
+isso demonstre equivalência. O NSGA-III obteve $HV_{48}$ significativamente
+maior que o MOEA/D. Portanto, para o problema, as configurações e o número de
+avaliações estudados, a seleção por pontos de referência mostrou-se
+competitiva, mas não ofereceu vantagem sobre o NSGA-II.
 
 A inclusão de $r$ e $L/R$ permitiu avaliar conjuntamente decisões operacionais
 e construtivas. Contudo, os métodos concentraram $r$ no limite superior e
@@ -603,12 +647,12 @@ associado principalmente à rotação e ao instante de ignição. Como o modelo 
 representa detonação, transferência de calor, atrito ou restrições estruturais,
 essas tendências não constituem recomendações construtivas para um motor real.
 
-As conclusões se restringem ao modelo idealizado, ao domínio e ao orçamento
-estudados, com execuções independentes entre algoritmos. Trabalhos futuros
-devem incorporar perdas e dados experimentais, impor restrições de pressão e
-temperatura e considerar objetivos adicionais, cenário em que o mecanismo de
-pontos de referência do NSGA-III poderá ser avaliado em uma formulação
-genuinamente de muitos objetivos.
+As conclusões se restringem ao modelo idealizado, ao domínio e ao limite de
+avaliações adotados, com execuções independentes entre algoritmos. Trabalhos
+futuros devem incorporar perdas e dados experimentais, impor restrições de
+pressão e temperatura e considerar objetivos adicionais, cenário em que o
+mecanismo de pontos de referência do NSGA-III poderá ser avaliado em uma
+formulação genuinamente de muitos objetivos.
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
