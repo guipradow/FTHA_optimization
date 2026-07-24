@@ -8,10 +8,10 @@ The four decisions are engine speed, ignition timing, compression ratio, and
 connecting-rod-to-crank ratio.  They are optimized in a unit hypercube so that
 the variation operators see comparable numerical ranges.
 
-NSGA-II and NSGA-III are provided by DEAP, MOEA/D by pymoo, and MOPSO extends
-the PySwarm velocity update with the external nondominated repository proposed
-by Coello Coello and Lechuga.  PySwarm itself exposes a scalar objective API,
-so the repository and Pareto leader-selection layer are implemented here.
+NSGA-II and NSGA-III are provided by DEAP and MOEA/D by pymoo.  The adapted
+MOPSO is implemented locally with NumPy: it combines the standard particle
+velocity update with an external nondominated repository, crowding-based
+leader selection, and a decaying Gaussian perturbation.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ import pickle
 import random
 import time
 from dataclasses import dataclass, replace
+from itertools import combinations
 from pathlib import Path
 from typing import Callable, Iterable, Sequence
 
@@ -64,6 +65,7 @@ from pymoo.operators.mutation.pm import PM
 from pymoo.optimize import minimize
 from pymoo.parallelization import StarmapParallelization
 from pymoo.util.ref_dirs import get_reference_directions
+from scipy import stats
 from .FTHA import (
     DECISION_LOWER_BOUNDS,
     DECISION_UPPER_BOUNDS,
@@ -87,6 +89,20 @@ RUN_STATISTICS_PATH = REPORTS_DIRECTORY / "multiobjective_run_statistics.csv"
 SUMMARY_PATH = REPORTS_DIRECTORY / "multiobjective_summary.csv"
 BEST_SOLUTIONS_PATH = REPORTS_DIRECTORY / "multiobjective_best_solutions.csv"
 CONFIGURATION_PATH = REPORTS_DIRECTORY / "multiobjective_configuration.csv"
+HV48_PARETO_SOLUTIONS_PATH = (
+    REPORTS_DIRECTORY / "multiobjective_hv48_pareto_solutions.csv"
+)
+HV48_RUN_STATISTICS_PATH = (
+    REPORTS_DIRECTORY / "multiobjective_hv48_run_statistics.csv"
+)
+HV48_SUMMARY_PATH = REPORTS_DIRECTORY / "multiobjective_hv48_summary.csv"
+HV48_GLOBAL_TEST_PATH = REPORTS_DIRECTORY / "multiobjective_hv48_global_test.csv"
+HV48_PAIRWISE_TESTS_PATH = (
+    REPORTS_DIRECTORY / "multiobjective_hv48_pairwise_tests.csv"
+)
+HV48_REPRESENTATIVE_RUNS_PATH = (
+    REPORTS_DIRECTORY / "multiobjective_hv48_representative_runs.csv"
+)
 CHECKPOINT_PATH = REPORTS_DIRECTORY / "multiobjective_checkpoint.pkl"
 PARETO_FIGURE_PATH = IMAGES_DIRECTORY / "multiobjective_pareto_front.png"
 RUNTIME_FIGURE_PATH = IMAGES_DIRECTORY / "multiobjective_runtime_boxplot.png"
@@ -98,8 +114,14 @@ ALGORITHM_NAMES = ("NSGA-II", "NSGA-III", "MOPSO", "MOEA/D")
 FRAMEWORK_NAMES = {
     "NSGA-II": "DEAP",
     "NSGA-III": "DEAP",
-    "MOPSO": "PySwarm + Pareto repository",
+    "MOPSO": "NumPy + Pareto repository",
     "MOEA/D": "pymoo",
+}
+DISPLAY_NAMES = {
+    "NSGA-II": "NSGA-II",
+    "NSGA-III": "NSGA-III",
+    "MOPSO": "MOPSO adaptado",
+    "MOEA/D": "MOEA/D",
 }
 
 DEFAULT_RUNS = 21
@@ -113,6 +135,8 @@ DEFAULT_POPULATION_SIZE = 48
 DEFAULT_GENERATIONS = 100
 DEFAULT_BASE_SEED = 20_260_718
 DEFAULT_WORKERS = min(8, max(1, mp.cpu_count()))
+FIXED_CARDINALITY_SIZE = 48
+STATISTICAL_SIGNIFICANCE_LEVEL = 0.05
 
 N_DECISION_VARIABLES = len(DECISION_VARIABLE_NAMES)
 if DECISION_LOWER_BOUNDS.shape != (N_DECISION_VARIABLES,) or (
@@ -168,6 +192,18 @@ class AlgorithmRunResult:
     evaluations: int
     normalized_decisions: np.ndarray
     scaled_objectives: np.ndarray
+
+
+@dataclass(slots=True)
+class FixedCardinalityAnalysis:
+    """Machine-readable tables for the common-cardinality comparison."""
+
+    pareto: pd.DataFrame
+    runs: pd.DataFrame
+    summary: pd.DataFrame
+    global_test: pd.DataFrame
+    pairwise_tests: pd.DataFrame
+    representative_runs: pd.DataFrame
 
 
 def denormalize_decisions(normalized_decisions: Sequence[float]) -> np.ndarray:
@@ -411,6 +447,46 @@ def crowding_distances(objectives: np.ndarray) -> np.ndarray:
     return distances
 
 
+def fixed_cardinality_indices(
+    objectives: np.ndarray,
+    maximum_size: int = FIXED_CARDINALITY_SIZE,
+) -> np.ndarray:
+    """Return a deterministic crowding-pruned subset of a biobjective front.
+
+    Objective-wise extremes receive infinite crowding distance and are
+    preserved.  When several interior points have numerically equal minimum
+    crowding, the lexicographically greatest objective row (and then its
+    original index) is removed.  This makes post-processing independent of a
+    random-number generator.
+    """
+    values = np.asarray(objectives, dtype=float)
+    if values.ndim != 2 or values.shape[1] != 2:
+        raise ValueError("objectives must have shape (n, 2).")
+    if maximum_size < 2:
+        raise ValueError("maximum_size must be at least two.")
+
+    kept = list(map(int, nondominated_indices(values)))
+    while len(kept) > maximum_size:
+        current = values[kept]
+        crowding = crowding_distances(current)
+        finite = np.flatnonzero(np.isfinite(crowding))
+        if not finite.size:
+            raise RuntimeError(
+                "Could not prune the front while preserving objective extremes."
+            )
+        minimum = crowding[finite].min()
+        candidates = finite[np.isclose(crowding[finite], minimum)]
+        remove_local_index = max(
+            map(int, candidates),
+            key=lambda local_index: (
+                *values[kept[local_index]],
+                kept[local_index],
+            ),
+        )
+        kept.pop(remove_local_index)
+    return np.asarray(sorted(kept), dtype=int)
+
+
 def _update_archive(
     archive_positions: np.ndarray,
     archive_objectives: np.ndarray,
@@ -463,7 +539,7 @@ def run_mopso(
     generations: int,
     pool: mp.pool.Pool | None,
 ) -> tuple[np.ndarray, np.ndarray, int, float]:
-    """Run a Pareto-repository extension of the PySwarm PSO update."""
+    """Run the locally adapted MOPSO with a nondominated repository."""
     rng = np.random.default_rng(seed)
     start = time.perf_counter()
     shape = (population_size, N_DECISION_VARIABLES)
@@ -908,6 +984,347 @@ def build_result_tables(
     return pareto_table, run_table, summary_table, best_table
 
 
+def _scaled_objectives_from_pareto_table(front: pd.DataFrame) -> np.ndarray:
+    return np.column_stack(
+        (
+            -front["thermal_efficiency_percent"].to_numpy(dtype=float)
+            / EFFICIENCY_SCALE_PERCENT,
+            -front["net_specific_power_kw_per_kg"].to_numpy(dtype=float)
+            / POWER_SCALE_KW_PER_KG,
+        )
+    )
+
+
+def _ordered_algorithm_names(table: pd.DataFrame) -> list[str]:
+    present = list(dict.fromkeys(table["algorithm"].astype(str)))
+    ordered = [name for name in ALGORITHM_NAMES if name in present]
+    return ordered + [name for name in present if name not in ordered]
+
+
+def _holm_adjust(p_values: Sequence[float]) -> np.ndarray:
+    values = np.asarray(p_values, dtype=float)
+    if not len(values):
+        return values
+    order = np.argsort(values)
+    adjusted = np.empty_like(values)
+    running_maximum = 0.0
+    number = len(values)
+    for rank, index in enumerate(order):
+        corrected = min(1.0, (number - rank) * values[index])
+        running_maximum = max(running_maximum, corrected)
+        adjusted[index] = running_maximum
+    return adjusted
+
+
+def _cliffs_delta(first: np.ndarray, second: np.ndarray) -> float:
+    differences = np.asarray(first, dtype=float)[:, None] - np.asarray(
+        second, dtype=float
+    )[None, :]
+    return float(np.sign(differences).sum() / differences.size)
+
+
+def build_hv48_statistical_tables(
+    run_table: pd.DataFrame,
+    alpha: float = STATISTICAL_SIGNIFICANCE_LEVEL,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Build global and all-pairs independent-sample tests for ``HV_48``."""
+    names = _ordered_algorithm_names(run_table)
+    global_columns = (
+        "metric",
+        "test",
+        "groups",
+        "degrees_of_freedom",
+        "statistic",
+        "p_value",
+        "alpha",
+    )
+    pairwise_columns = (
+        "metric",
+        "test",
+        "algorithm_a",
+        "algorithm_b",
+        "n_a",
+        "n_b",
+        "mean_a",
+        "mean_b",
+        "median_a",
+        "median_b",
+        "mean_difference_a_minus_b",
+        "mann_whitney_u",
+        "p_value",
+        "holm_adjusted_p_value",
+        "cliffs_delta_a_minus_b",
+        "alpha",
+        "reject_after_holm",
+    )
+    if len(names) < 2:
+        return (
+            pd.DataFrame(columns=global_columns),
+            pd.DataFrame(columns=pairwise_columns),
+        )
+
+    samples = {
+        name: run_table.loc[
+            run_table["algorithm"] == name, "hypervolume_48"
+        ].to_numpy(dtype=float)
+        for name in names
+    }
+    global_test = stats.kruskal(*(samples[name] for name in names))
+    global_table = pd.DataFrame.from_records(
+        [
+            {
+                "metric": "hypervolume_48",
+                "test": "Kruskal-Wallis",
+                "groups": len(names),
+                "degrees_of_freedom": len(names) - 1,
+                "statistic": float(global_test.statistic),
+                "p_value": float(global_test.pvalue),
+                "alpha": alpha,
+            }
+        ],
+        columns=global_columns,
+    )
+
+    records: list[dict[str, float | int | str | bool]] = []
+    for first_name, second_name in combinations(names, 2):
+        first = samples[first_name]
+        second = samples[second_name]
+        test = stats.mannwhitneyu(
+            first,
+            second,
+            alternative="two-sided",
+            method="asymptotic",
+        )
+        records.append(
+            {
+                "metric": "hypervolume_48",
+                "test": "Mann-Whitney U, two-sided",
+                "algorithm_a": first_name,
+                "algorithm_b": second_name,
+                "n_a": len(first),
+                "n_b": len(second),
+                "mean_a": first.mean(),
+                "mean_b": second.mean(),
+                "median_a": np.median(first),
+                "median_b": np.median(second),
+                "mean_difference_a_minus_b": first.mean() - second.mean(),
+                "mann_whitney_u": float(test.statistic),
+                "p_value": float(test.pvalue),
+                "cliffs_delta_a_minus_b": _cliffs_delta(first, second),
+                "alpha": alpha,
+            }
+        )
+    pairwise_table = pd.DataFrame.from_records(records)
+    pairwise_table["holm_adjusted_p_value"] = _holm_adjust(
+        pairwise_table["p_value"]
+    )
+    pairwise_table["reject_after_holm"] = (
+        pairwise_table["holm_adjusted_p_value"] < alpha
+    )
+    return global_table, pairwise_table.loc[:, pairwise_columns]
+
+
+def build_fixed_cardinality_analysis(
+    pareto_table: pd.DataFrame,
+    raw_run_table: pd.DataFrame,
+    maximum_size: int = FIXED_CARDINALITY_SIZE,
+) -> FixedCardinalityAnalysis:
+    """Build the common-cardinality fronts, summaries, and statistical tests."""
+    required_pareto_columns = {
+        "algorithm",
+        "run",
+        "thermal_efficiency_percent",
+        "net_specific_power_kw_per_kg",
+        *DECISION_VARIABLE_NAMES,
+    }
+    required_run_columns = {
+        "algorithm",
+        "framework",
+        "run",
+        "seed",
+        "evaluations",
+        "front_size",
+        "hypervolume",
+        "runtime_seconds",
+    }
+    missing_pareto = required_pareto_columns - set(pareto_table.columns)
+    missing_runs = required_run_columns - set(raw_run_table.columns)
+    if missing_pareto:
+        raise ValueError(
+            "pareto_table is missing columns: " + ", ".join(sorted(missing_pareto))
+        )
+    if missing_runs:
+        raise ValueError(
+            "raw_run_table is missing columns: " + ", ".join(sorted(missing_runs))
+        )
+
+    capped_groups: list[pd.DataFrame] = []
+    for algorithm_name in _ordered_algorithm_names(raw_run_table):
+        algorithm_runs = raw_run_table[
+            raw_run_table["algorithm"] == algorithm_name
+        ].sort_values("run")
+        for run in algorithm_runs["run"]:
+            front = pareto_table[
+                (pareto_table["algorithm"] == algorithm_name)
+                & (pareto_table["run"] == run)
+            ].copy()
+            if front.empty:
+                raise ValueError(
+                    f"Missing Pareto solutions for {algorithm_name} run {run}."
+                )
+            if "solution" in front.columns:
+                front = front.sort_values("solution", kind="stable")
+            objectives = _scaled_objectives_from_pareto_table(front)
+            kept = fixed_cardinality_indices(objectives, maximum_size)
+            capped = front.iloc[kept].copy().reset_index(drop=True)
+            capped_objectives = objectives[kept]
+            capped["front_size_before_hv48"] = len(front)
+            capped["fixed_cardinality_limit"] = maximum_size
+            capped["hv48_solution"] = np.arange(1, len(capped) + 1)
+            capped["scaled_minimization_efficiency"] = capped_objectives[:, 0]
+            capped["scaled_minimization_power"] = capped_objectives[:, 1]
+            capped_groups.append(capped)
+
+    capped_table = pd.concat(capped_groups, ignore_index=True)
+    all_objectives = capped_table[
+        ["scaled_minimization_efficiency", "scaled_minimization_power"]
+    ].to_numpy(dtype=float)
+    pooled_indices = nondominated_indices(all_objectives)
+    pooled_benefits = _benefits_from_objectives(all_objectives[pooled_indices])
+    ideal = pooled_benefits.max(axis=0)
+    nadir = pooled_benefits.min(axis=0)
+    capped_table["hv48_compromise_score"] = np.nan
+    capped_table["is_hv48_run_compromise"] = False
+
+    hypervolume = HV(ref_point=np.zeros(2))
+    run_records: list[dict[str, float | int | str | bool]] = []
+    for algorithm_name in _ordered_algorithm_names(raw_run_table):
+        algorithm_runs = raw_run_table[
+            raw_run_table["algorithm"] == algorithm_name
+        ].sort_values("run")
+        for _, raw_run in algorithm_runs.iterrows():
+            run = int(raw_run["run"])
+            mask = (capped_table["algorithm"] == algorithm_name) & (
+                capped_table["run"] == run
+            )
+            indices = capped_table.index[mask].to_numpy()
+            front = capped_table.loc[indices]
+            objectives = front[
+                ["scaled_minimization_efficiency", "scaled_minimization_power"]
+            ].to_numpy(dtype=float)
+            benefits = _benefits_from_objectives(objectives)
+            scores = _compromise_scores(benefits, ideal, nadir)
+            representative_local = int(np.argmin(scores))
+            representative_index = int(indices[representative_local])
+            capped_table.loc[indices, "hv48_compromise_score"] = scores
+            capped_table.loc[
+                representative_index, "is_hv48_run_compromise"
+            ] = True
+            representative = capped_table.loc[representative_index]
+
+            record: dict[str, float | int | str | bool] = {
+                "algorithm": algorithm_name,
+                "display_name": DISPLAY_NAMES.get(
+                    algorithm_name, algorithm_name
+                ),
+                "framework": FRAMEWORK_NAMES.get(
+                    algorithm_name, raw_run["framework"]
+                ),
+                "run": run,
+                "seed": int(raw_run["seed"]),
+                "evaluations": int(raw_run["evaluations"]),
+                "fixed_cardinality_limit": maximum_size,
+                "front_size_before_hv48": int(raw_run["front_size"]),
+                "front_size_hv48": len(front),
+                "was_truncated_for_hv48": len(front)
+                < int(raw_run["front_size"]),
+                "hypervolume_raw": float(raw_run["hypervolume"]),
+                "hypervolume_48": float(hypervolume(objectives)),
+                "runtime_seconds": float(raw_run["runtime_seconds"]),
+                "hv48_compromise_score": float(scores[representative_local]),
+                "hv48_compromise_thermal_efficiency_percent": float(
+                    representative["thermal_efficiency_percent"]
+                ),
+                "hv48_compromise_net_specific_power_kw_per_kg": float(
+                    representative["net_specific_power_kw_per_kg"]
+                ),
+            }
+            for decision_name in DECISION_VARIABLE_NAMES:
+                record[f"hv48_compromise_{decision_name}"] = float(
+                    representative[decision_name]
+                )
+            run_records.append(record)
+
+    run_table = pd.DataFrame.from_records(run_records)
+    run_table["is_hv48_representative_run"] = False
+    summary_records: list[dict[str, float | int | str]] = []
+    representative_indices: list[int] = []
+    for algorithm_name in _ordered_algorithm_names(run_table):
+        rows = run_table[run_table["algorithm"] == algorithm_name]
+        values = rows["hypervolume_48"]
+        first_quartile, median, third_quartile = values.quantile(
+            [0.25, 0.50, 0.75]
+        )
+        representative_index = (
+            rows.assign(distance_to_median=(values - median).abs())
+            .sort_values(["distance_to_median", "run"], kind="stable")
+            .index[0]
+        )
+        representative_indices.append(int(representative_index))
+        representative = run_table.loc[representative_index]
+        summary_record: dict[str, float | int | str] = {
+            "algorithm": algorithm_name,
+            "display_name": DISPLAY_NAMES.get(algorithm_name, algorithm_name),
+            "framework": representative["framework"],
+            "runs": len(rows),
+            "fixed_cardinality_limit": maximum_size,
+            "front_size_before_hv48_mean": rows[
+                "front_size_before_hv48"
+            ].mean(),
+            "front_size_hv48_mean": rows["front_size_hv48"].mean(),
+            "hypervolume_48_mean": values.mean(),
+            "hypervolume_48_std": values.std(ddof=1),
+            "hypervolume_48_median": median,
+            "hypervolume_48_q1": first_quartile,
+            "hypervolume_48_q3": third_quartile,
+            "hypervolume_48_iqr": third_quartile - first_quartile,
+            "hypervolume_48_min": values.min(),
+            "hypervolume_48_max": values.max(),
+            "representative_run": int(representative["run"]),
+            "representative_seed": int(representative["seed"]),
+            "representative_hypervolume_48": representative["hypervolume_48"],
+            "runtime_seconds_mean": rows["runtime_seconds"].mean(),
+            "runtime_seconds_std": rows["runtime_seconds"].std(ddof=1),
+        }
+        compromise_columns = (
+            *(
+                f"hv48_compromise_{name}"
+                for name in DECISION_VARIABLE_NAMES
+            ),
+            "hv48_compromise_thermal_efficiency_percent",
+            "hv48_compromise_net_specific_power_kw_per_kg",
+        )
+        for column in compromise_columns:
+            summary_record[f"{column}_mean"] = rows[column].mean()
+            summary_record[f"{column}_std"] = rows[column].std(ddof=1)
+        summary_records.append(summary_record)
+
+    run_table.loc[
+        representative_indices, "is_hv48_representative_run"
+    ] = True
+    summary_table = pd.DataFrame.from_records(summary_records)
+    representative_runs = run_table.loc[representative_indices].copy()
+    global_table, pairwise_table = build_hv48_statistical_tables(run_table)
+    return FixedCardinalityAnalysis(
+        pareto=capped_table,
+        runs=run_table,
+        summary=summary_table,
+        global_test=global_table,
+        pairwise_tests=pairwise_table,
+        representative_runs=representative_runs,
+    )
+
+
 def configuration_table(
     runs: int,
     population_size: int,
@@ -979,6 +1396,11 @@ def configuration_table(
         "mopso_perturbation_rationale": (
             "decaying local Gaussian adaptation for bounded-domain exploration"
         ),
+        "mopso_implementation": (
+            "local NumPy implementation with Pareto repository and "
+            "crowding-based leaders"
+        ),
+        "pyswarm_used_by_mopso": False,
         "moead_neighbors": min(MOEAD_NEIGHBORS, population_size),
         "moead_neighbor_mating_probability": MOEAD_NEIGHBOR_MATING_PROBABILITY,
         "moead_rationale": (
@@ -1011,20 +1433,20 @@ def configuration_table(
 
 def _save_pareto_figure(
     pareto_table: pd.DataFrame,
-    run_table: pd.DataFrame,
+    representative_runs: pd.DataFrame,
 ) -> None:
     with plt.rc_context(CHART_STYLE):
         figure, axis = plt.subplots(figsize=(7.2, 4.8), constrained_layout=True)
         for algorithm_index, algorithm_name in enumerate(ALGORITHM_NAMES):
-            algorithm_runs = run_table[run_table["algorithm"] == algorithm_name]
-            if algorithm_runs.empty:
+            representative = representative_runs[
+                representative_runs["algorithm"] == algorithm_name
+            ]
+            if representative.empty:
                 continue
-            best_run = int(
-                algorithm_runs.loc[algorithm_runs["hypervolume"].idxmax(), "run"]
-            )
+            selected_run = int(representative.iloc[0]["run"])
             front = pareto_table[
                 (pareto_table["algorithm"] == algorithm_name)
-                & (pareto_table["run"] == best_run)
+                & (pareto_table["run"] == selected_run)
             ].sort_values("thermal_efficiency_percent")
             style = BLACK_AND_WHITE_SERIES_STYLES[algorithm_index]
             axis.plot(
@@ -1035,7 +1457,7 @@ def _save_pareto_figure(
                 markersize=4.0,
                 markerfacecolor="white",
                 markeredgecolor="black",
-                label=f"{algorithm_name} (execução {best_run})",
+                label=DISPLAY_NAMES.get(algorithm_name, algorithm_name),
                 **style,
             )
         axis.set_xlabel(r"Eficiência térmica, $\eta_t$ [%]")
@@ -1171,6 +1593,44 @@ def _save_constructive_decisions_figure(
         plt.close(figure)
 
 
+def save_fixed_cardinality_analysis(
+    pareto_table: pd.DataFrame,
+    raw_run_table: pd.DataFrame,
+    maximum_size: int = FIXED_CARDINALITY_SIZE,
+) -> FixedCardinalityAnalysis:
+    """Persist the common-cardinality analysis without replacing raw tables."""
+    REPORTS_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    IMAGES_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    analysis = build_fixed_cardinality_analysis(
+        pareto_table,
+        raw_run_table,
+        maximum_size=maximum_size,
+    )
+    analysis.pareto.to_csv(HV48_PARETO_SOLUTIONS_PATH, index=False)
+    analysis.runs.to_csv(HV48_RUN_STATISTICS_PATH, index=False)
+    analysis.summary.to_csv(HV48_SUMMARY_PATH, index=False)
+    analysis.global_test.to_csv(HV48_GLOBAL_TEST_PATH, index=False)
+    analysis.pairwise_tests.to_csv(HV48_PAIRWISE_TESTS_PATH, index=False)
+    analysis.representative_runs.to_csv(
+        HV48_REPRESENTATIVE_RUNS_PATH, index=False
+    )
+    _save_pareto_figure(analysis.pareto, analysis.representative_runs)
+    return analysis
+
+
+def rebuild_fixed_cardinality_analysis_from_reports(
+    maximum_size: int = FIXED_CARDINALITY_SIZE,
+) -> FixedCardinalityAnalysis:
+    """Rebuild ``HV_48`` artifacts from the preserved raw benchmark CSVs."""
+    pareto_table = pd.read_csv(PARETO_SOLUTIONS_PATH)
+    raw_run_table = pd.read_csv(RUN_STATISTICS_PATH)
+    return save_fixed_cardinality_analysis(
+        pareto_table,
+        raw_run_table,
+        maximum_size=maximum_size,
+    )
+
+
 def save_results(
     results: Sequence[AlgorithmRunResult],
     runs: int,
@@ -1190,7 +1650,7 @@ def save_results(
     configuration_table(
         runs, population_size, generations, base_seed, workers
     ).to_csv(CONFIGURATION_PATH, index=False)
-    _save_pareto_figure(pareto, per_run)
+    save_fixed_cardinality_analysis(pareto, per_run)
     _save_runtime_figure(per_run)
     _save_constructive_decisions_figure(pareto, per_run)
     if CHECKPOINT_PATH.exists():

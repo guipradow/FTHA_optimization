@@ -1,0 +1,2 @@
+metric,test,groups,degrees_of_freedom,statistic,p_value,alpha
+hypervolume_48,Kruskal-Wallis,4,3,61.09395758303316,3.4315999802695666e-13,0.05

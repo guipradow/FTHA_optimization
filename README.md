@@ -471,8 +471,8 @@ objetivos, 47 partições produzem 48 pontos uniformes do NSGA-III; a populaçã
 coincide com essas direções e é múltipla de quatro para o torneio DCD do
 NSGA-II. As 100 gerações estão no intervalo de 80–120 ciclos examinado no
 [MOPSO original](https://doi.org/10.1109/CEC.2002.1004388) e ampliam a
-profundidade da busca para quatro decisões; sua suficiência é verificada pela
-trajetória do hipervolume, e não presumida pelo número nominal.
+profundidade da busca para quatro decisões. Esse orçamento comum controla o
+esforço da comparação, mas não demonstra, isoladamente, convergência.
 
 Cada método é executado 21 vezes com sementes independentes, totalizando 84
 execuções e 407.232 chamadas do FTHA. Vinte e uma repetições superam as 20 do
@@ -484,7 +484,7 @@ garantia universal de poder estatístico.
 |---|---|
 | NSGA-II | [DEAP `selNSGA2`](https://deap.readthedocs.io/en/master/api/tools.html#deap.tools.selNSGA2), torneio DCD e elitismo. SBX usa $p_c=0{,}9$ e $\eta_c=20$; mutação polinomial usa $\eta_m=20$ e $p_m=1/n_{var}=0{,}25$ por variável. Esses valores são uma referência consolidada para variáveis reais no [NSGA-II de Deb et al.](https://doi.org/10.1109/4235.996017): cruzamento frequente e perturbações majoritariamente locais, com uma coordenada mutada em média. |
 | NSGA-III | [DEAP `selNSGA3`](https://deap.readthedocs.io/en/stable/examples/nsga3.html), os mesmos operadores e 48 pontos de referência ($p=47$). Compartilhar os operadores isola o efeito da seleção; não se afirma que seja a configuração original exata de [Deb e Jain](https://doi.org/10.1109/TEVC.2013.2281535). |
-| MOPSO | 48 partículas, $\omega=0{,}4$ e $c_1=c_2=1$, conforme [Coello Coello e Lechuga](https://doi.org/10.1109/CEC.2002.1004388). O arquivo externo $4N=192$ aproxima o repositório de 200 soluções do estudo original. A perturbação local, explicitamente uma adaptação desta implementação, tem probabilidade inicial 0,10, desvio 0,10 no espaço normalizado e decai até zero para combinar exploração inicial e estabilidade final. |
+| MOPSO adaptado | Implementação local em NumPy com 48 partículas, $\omega=0{,}4$ e $c_1=c_2=1$, conforme [Coello Coello e Lechuga](https://doi.org/10.1109/CEC.2002.1004388). O arquivo externo $4N=192$ aproxima o repositório de 200 soluções; líderes são favorecidos por distância de aglomeração. Em cada partícula sorteada, a adaptação perturba uma coordenada com desvio 0,10 no espaço normalizado e probabilidade reduzida linearmente a partir de 0,10 ao longo das gerações. |
 | MOEA/D | [`MOEAD` do pymoo](https://pymoo.org/algorithms/moo/moead.html), 48 direções, Tchebycheff, 10 vizinhos e probabilidade 0,9 de acasalamento local. Dez vizinhos mantêm aproximadamente os 20% usados com população 100 no [trabalho original](https://doi.org/10.1109/TEVC.2007.892759); 0,9 prioriza cooperação local e reserva 10% para interações globais. |
 
 As versões, sementes e todos os hiperparâmetros estão registrados de forma
@@ -507,11 +507,17 @@ intervalo ideal–nadir e pesos iguais. A melhor solução de cada algoritmo é 
 menor valor desse mesmo escore entre todas as suas frentes.
 
 O hipervolume usa a referência física $(\eta_t,\dot{w}_{liq})=(0,0)$ após as
-escalas fixas. Valores maiores indicam simultaneamente melhor convergência e
-cobertura. O tempo contém seleção e as 4.848 avaliações exatas, mas não a criação
-inicial do conjunto de processos, compartilhado por todo o experimento. O
-paralelismo altera apenas o tempo: sementes, avaliações e resultados não
-dependem da ordem de conclusão das tarefas.
+escalas fixas. Como o repositório do MOPSO adaptado pode conter até 192 pontos e
+as populações dos demais métodos têm no máximo 48, a comparação principal usa
+$HV_{48}$: antes do cálculo, cada frente é limitada a no máximo 48 soluções
+pela remoção iterativa do ponto de menor distância de aglomeração, preservando
+os extremos e resolvendo empates por regra lexicográfica determinística.
+Valores maiores indicam simultaneamente melhor convergência e cobertura. O
+tempo contém seleção e as
+4.848 avaliações exatas, mas não a criação inicial do conjunto de processos,
+compartilhado por todo o experimento. O paralelismo altera apenas o tempo:
+sementes, avaliações e resultados não dependem da ordem de conclusão das
+tarefas.
 
 ### Resultados das 21 execuções
 
@@ -519,38 +525,40 @@ As 84 execuções concluíram as 407.232 avaliações previstas
 ($4\times21\times4.848$). Média e desvio padrão das métricas de qualidade e
 custo foram:
 
-| Algoritmo | Hipervolume médio ± DP | Melhor hipervolume | Tempo médio ± DP [s] |
+| Algoritmo | $HV_{48}$ médio ± DP | Mediana [Q1; Q3] | Tempo médio ± DP [s] |
 |---|---:|---:|---:|
-| NSGA-II | **0,845957 ± 0,000148** | 0,846259 | **23,87 ± 2,39** |
-| NSGA-III | 0,844977 ± 0,000755 | 0,846350 | 25,16 ± 2,75 |
-| MOPSO | 0,845922 ± 0,000717 | **0,847139** | 23,89 ± 1,95 |
-| MOEA/D | 0,840189 ± 0,004676 | 0,844662 | 139,55 ± 3,19 |
+| NSGA-II | **0,845957 ± 0,000148** | 0,845967 [0,845857; 0,846061] | **23,87 ± 2,39** |
+| NSGA-III | 0,844977 ± 0,000755 | 0,845202 [0,844663; 0,845414] | 25,16 ± 2,75 |
+| MOPSO adaptado | 0,844605 ± 0,000702 | 0,844741 [0,844264; 0,845014] | 23,89 ± 1,95 |
+| MOEA/D | 0,840189 ± 0,004676 | 0,841335 [0,838070; 0,843984] | 139,55 ± 3,19 |
 
-O NSGA-II apresentou o maior hipervolume médio, mas a diferença para o MOPSO
-foi apenas 0,004% e a diferença para o NSGA-III, 0,116%. O MOPSO encontrou a
-melhor frente isolada; suas medianas e as do NSGA-II também ficaram muito
-próximas (0,846005 e 0,845967, respectivamente). O MOEA/D obteve hipervolume
-médio 0,682% abaixo do NSGA-II e levou 5,85 vezes mais tempo. Esse custo decorre
-da atualização sequencial dos subproblemas vizinhos na implementação do pymoo,
-que aproveita menos o paralelismo entre avaliações. As diferenças pequenas de
-qualidade entre os três primeiros métodos não sustentam uma alegação de
-superioridade universal.
+O teste de Kruskal–Wallis indicou diferença global
+($H(3)=61,094$; $p=3,43\times10^{-13}$). Nas seis comparações bilaterais de
+Mann–Whitney com correção de Holm, o NSGA-II apresentou $HV_{48}$ 0,116%
+maior que o NSGA-III
+($p_{\mathrm{Holm}}=4,24\times10^{-6}$;
+$\delta_{\mathrm{Cliff}}=0,882$). A diferença entre NSGA-III e MOPSO adaptado
+não atingiu significância estatística a 5%
+($p_{\mathrm{Holm}}=0,0592$; $\delta_{\mathrm{Cliff}}=0,342$), enquanto o
+NSGA-III obteve $HV_{48}$ significativamente maior que o MOEA/D
+($p_{\mathrm{Holm}}=4,24\times10^{-6}$;
+$\delta_{\mathrm{Cliff}}=0,882$). Essas conclusões se restringem ao indicador,
+ao problema, às configurações e ao orçamento estudados.
 
-O MOPSO pode devolver até 192 membros de seu repositório, enquanto os outros
-métodos devolvem no máximo 48 membros da população. O hipervolume foi calculado
-sobre a saída completa de cada método; portanto, ele mede a frente efetivamente
-entregue ao usuário, mas parte da vantagem de densidade de uma execução MOPSO
-decorre dessa memória externa. A conclusão mais robusta é a estabilidade do
-NSGA-II, não superioridade universal de um algoritmo.
+As métricas brutas preservadas nos relatórios também descrevem a saída completa
+dos métodos. Nelas, o arquivo de até 192 pontos do MOPSO adaptado resulta em
+hipervolume médio 0,845922 e máximo 0,847139. Esses valores são úteis para
+auditar a frente entregue pelo algoritmo, mas não constituem a comparação
+principal, pois incluem uma densidade até quatro vezes maior.
 
-Os pontos de compromisso de pesos iguais apresentaram as seguintes médias
-entre sementes:
+Nas frentes completas preservadas nos relatórios, os pontos de compromisso de
+pesos iguais apresentaram as seguintes médias entre sementes:
 
 | Algoritmo | $N$ médio ± DP [rpm] | $\theta$ médio ± DP [°] | $r$ médio ± DP | $L/R$ médio ± DP | $\eta_t$ média ± DP [%] | Potência média ± DP [kW/kg] |
 |---|---:|---:|---:|---:|---:|---:|
 | NSGA-II | 5.231 ± 150 | −38,08 ± 1,27 | 11,9996 ± 0,0006 | 4,389 ± 0,032 | 35,527 ± 0,139 | 15.486,1 ± 382,3 |
 | NSGA-III | 5.201 ± 151 | −37,49 ± 1,31 | 11,9994 ± 0,0011 | 4,383 ± 0,027 | 35,558 ± 0,142 | 15.409,4 ± 384,6 |
-| MOPSO | **5.159 ± 103** | −37,07 ± 1,11 | 11,9866 ± 0,0109 | 4,221 ± 0,081 | **35,570 ± 0,098** | **15.292,5 ± 264,3** |
+| MOPSO adaptado | **5.159 ± 103** | −37,07 ± 1,11 | 11,9866 ± 0,0109 | 4,221 ± 0,081 | **35,570 ± 0,098** | **15.292,5 ± 264,3** |
 | MOEA/D | 5.166 ± 134 | **−37,30 ± 1,10** | 11,9998 ± 0,0003 | **4,385 ± 0,026** | 35,590 ± 0,124 | 15.321,5 ± 343,4 |
 
 O negrito destaca a menor dispersão de cada coluna, e não o melhor valor de um
@@ -567,7 +575,7 @@ foram:
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | NSGA-II | 4 | 5.260,9 | −37,961 | 11,9992 | 4,3998 | 35,507 | 15.566,8 | 0,398507 |
 | NSGA-III | 12 | 5.239,1 | −37,406 | 11,9999 | 4,3999 | 35,528 | 15.511,4 | **0,398451** |
-| MOPSO | 9 | 5.225,9 | −38,194 | 11,9999 | 4,2894 | 35,526 | 15.471,3 | 0,399447 |
+| MOPSO adaptado | 9 | 5.225,9 | −38,194 | 11,9999 | 4,2894 | 35,526 | 15.471,3 | 0,399447 |
 | MOEA/D | 5 | 5.245,3 | −38,007 | 11,9998 | 4,3942 | 35,521 | 15.526,8 | 0,398533 |
 
 As diferenças entre esses escores são pequenas: não há evidência de que uma
@@ -581,18 +589,29 @@ o conflito entre os objetivos.
 
 ![Distribuição das decisões construtivas nas melhores frentes](img/multiobjective_constructive_decisions.png)
 
-![Frentes de Pareto das melhores execuções](img/multiobjective_pareto_front.png)
+![Frentes de Pareto de execuções representativas](img/multiobjective_pareto_front.png)
 
-A figura mostra a execução de maior hipervolume de cada método. Padrões de
-traço e marcadores redundantes mantêm as quatro frentes distinguíveis em
-impressão preto e branco.
+A figura mostra a execução com $HV_{48}$ mais próximo da mediana de cada
+método, após limitar as frentes a no máximo 48 soluções por distância de
+aglomeração. Padrões de traço e marcadores redundantes mantêm as quatro frentes
+distinguíveis em impressão preto e branco.
 
 ![Distribuição do tempo das 21 execuções](img/multiobjective_runtime_boxplot.png)
 
 Os resultados completos podem ser auditados em:
 
+- [`reports/multiobjective_hv48_pareto_solutions.csv`](reports/multiobjective_hv48_pareto_solutions.csv):
+  frentes limitadas a 48 soluções e escores de compromisso;
+- [`reports/multiobjective_hv48_run_statistics.csv`](reports/multiobjective_hv48_run_statistics.csv)
+  e [`reports/multiobjective_hv48_summary.csv`](reports/multiobjective_hv48_summary.csv):
+  $HV_{48}$ por execução, quartis, execuções representativas e compromissos;
+- [`reports/multiobjective_hv48_global_test.csv`](reports/multiobjective_hv48_global_test.csv)
+  e [`reports/multiobjective_hv48_pairwise_tests.csv`](reports/multiobjective_hv48_pairwise_tests.csv):
+  Kruskal–Wallis, seis testes de Mann–Whitney, correção de Holm e delta de Cliff;
+- [`reports/multiobjective_hv48_representative_runs.csv`](reports/multiobjective_hv48_representative_runs.csv):
+  execução mais próxima da mediana de cada método;
 - [`reports/multiobjective_pareto_solutions.csv`](reports/multiobjective_pareto_solutions.csv):
-  6.994 soluções não dominadas, com as quatro decisões, semente e execução;
+  6.994 soluções não dominadas brutas, com as quatro decisões, semente e execução;
 - [`reports/multiobjective_run_statistics.csv`](reports/multiobjective_run_statistics.csv):
   84 linhas com hipervolume, ponto de compromisso e tempo;
 - [`reports/multiobjective_summary.csv`](reports/multiobjective_summary.csv):

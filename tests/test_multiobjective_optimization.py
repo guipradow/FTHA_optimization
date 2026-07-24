@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 import numpy as np
+import pandas as pd
 
 from src.multiobjective_optimization import (
     AlgorithmRunResult,
@@ -17,10 +18,12 @@ from src.multiobjective_optimization import (
     MUTATION_PROBABILITY_PER_VARIABLE,
     N_DECISION_VARIABLES,
     _evaluate_normalized,
+    build_fixed_cardinality_analysis,
     build_result_tables,
     configuration_table,
     crowding_distances,
     denormalize_decisions,
+    fixed_cardinality_indices,
     nondominated_indices,
     run_experiment,
 )
@@ -88,6 +91,96 @@ class TestMultiobjectiveOptimization(unittest.TestCase):
         self.assertTrue(np.isinf(distances[0]))
         self.assertTrue(np.isinf(distances[2]))
         self.assertAlmostEqual(distances[1], 2.0)
+
+    def test_fixed_cardinality_pruning_is_deterministic_and_keeps_extremes(
+        self,
+    ) -> None:
+        objectives = np.array(
+            [
+                [0.0, 1.0],
+                [0.2, 0.8],
+                [0.4, 0.6],
+                [0.6, 0.4],
+                [0.8, 0.2],
+                [1.0, 0.0],
+            ]
+        )
+        first = fixed_cardinality_indices(objectives, maximum_size=4)
+        second = fixed_cardinality_indices(objectives, maximum_size=4)
+
+        np.testing.assert_array_equal(first, second)
+        self.assertEqual(len(first), 4)
+        self.assertIn(0, first)
+        self.assertIn(5, first)
+
+    def test_fixed_cardinality_analysis_builds_statistics_and_median_runs(
+        self,
+    ) -> None:
+        pareto_records = []
+        run_records = []
+        for algorithm_index, algorithm_name in enumerate(("A", "B")):
+            for run in (1, 2, 3):
+                point_count = 4 if algorithm_name == "A" else 3
+                efficiency_shift = 0.5 * run - algorithm_index
+                for solution in range(point_count):
+                    pareto_records.append(
+                        {
+                            "algorithm": algorithm_name,
+                            "framework": "test",
+                            "run": run,
+                            "seed": 100 * algorithm_index + run,
+                            "solution": solution + 1,
+                            "engine_speed_rpm": 1_000.0 + solution,
+                            "ignition_timing_degrees": -10.0 - solution,
+                            "compression_ratio": 10.0,
+                            "connecting_rod_to_crank_ratio": 4.0,
+                            "thermal_efficiency_percent": (
+                                20.0 + 5.0 * solution + efficiency_shift
+                            ),
+                            "net_specific_power_kw_per_kg": (
+                                400.0 - 100.0 * solution
+                            ),
+                            "compromise_score": 0.0,
+                            "is_run_compromise": False,
+                        }
+                    )
+                run_records.append(
+                    {
+                        "algorithm": algorithm_name,
+                        "framework": "test",
+                        "run": run,
+                        "seed": 100 * algorithm_index + run,
+                        "evaluations": 10,
+                        "front_size": point_count,
+                        "hypervolume": 0.5,
+                        "runtime_seconds": 1.0,
+                    }
+                )
+
+        analysis = build_fixed_cardinality_analysis(
+            pd.DataFrame.from_records(pareto_records),
+            pd.DataFrame.from_records(run_records),
+            maximum_size=3,
+        )
+
+        self.assertEqual(len(analysis.pareto), 18)
+        self.assertTrue(
+            (
+                analysis.runs.loc[
+                    analysis.runs["algorithm"] == "A", "front_size_hv48"
+                ]
+                == 3
+            ).all()
+        )
+        self.assertEqual(len(analysis.summary), 2)
+        self.assertEqual(len(analysis.global_test), 1)
+        self.assertEqual(
+            analysis.global_test.loc[0, "degrees_of_freedom"], 1
+        )
+        self.assertEqual(len(analysis.pairwise_tests), 1)
+        self.assertEqual(
+            int(analysis.runs["is_hv48_representative_run"].sum()), 2
+        )
 
     def test_result_tables_report_run_mean_standard_deviation_and_best(self) -> None:
         results = [
